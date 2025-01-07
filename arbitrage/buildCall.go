@@ -26,8 +26,8 @@ import (
 )
 
 const (
-	BURN_CALL_MAX_GAS = 200000 // roughly 140k to burn
-	ARBITRAGE_CALL_MAX_GAS = 400000 // roughly uniswap 180k + burn 140k
+	BURN_CALL_MAX_GAS       = 200000 // roughly 140k to burn
+	ARBITRAGE_CALL_MAX_GAS  = 300000 // roughly uniswap 180k + burn 140k - warm access
 	DISTRIBUTE_CALL_MAX_GAS = 500000 // roughly 400k
 
 	arbitrageContractAddressStr = "0x241bfb6e47d478456bf20aad81ecb512aed223c8"
