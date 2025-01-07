@@ -54,11 +54,14 @@ func BuildCall(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashb
 
 	baseGasBoosted := new(big.Int).Div(new(big.Int).Mul(baseGas, big.NewInt(150)), big.NewInt(100))
 
-	logger.Debug("fetched current gas settings",
-		slog.String("baseGas", baseGas.String()),
-		slog.String("baseGasBoosted", baseGasBoosted.String()),
-		slog.String("tipGas", tipGas.String()),
-	)
+	if logger.Enabled(ctx, slog.LevelInfo) {
+		baseGasFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(baseGas), new(big.Float).SetInt(big.NewInt(1e9))).Float64()
+		tipGasFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(tipGas), new(big.Float).SetInt(big.NewInt(1e9))).Float64()
+		baseGasBoostedFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(baseGasBoosted), new(big.Float).SetInt(big.NewInt(1e9))).Float64()
+
+		fmt.Printf("Current gas settings: base fee per gas is %.2f gwei, tip is %.2f gwei.\n", baseGasFloat, tipGasFloat)
+		fmt.Printf("Sending transaction with a base fee per gas of %.2f gwei for timely inclusion.\n\n", baseGasBoostedFloat)
+	}
 
 	nonce, err := getCurrentNonce(ctx, dataIn.Client, *dataIn.NodeAddress)
 	if err != nil {
@@ -191,7 +194,7 @@ func calcualteArbitrageData(ctx context.Context, logger *slog.Logger, dataIn Dat
 	primaryRatio := ethUnlockedFloat / rethToBurnFloat
 
 	uniswapReturnAmountWeth = new(big.Int).Sub(uniswapReturnAmountWeth, big.NewInt(5))
-	
+
 	// early exit if we use the users rETH
 	if dataIn.LocalReth {
 		if logger.Enabled(ctx, slog.LevelInfo) {

@@ -26,17 +26,43 @@ The core objective is to leverage **distribute** calls in combination with **rET
 ---
 
 ## Table of Contents
-
-1. [Requirements](#requirements)  
-2. [Installation](#installation)  
-3. [Known Issues & Limitations](#known-issues--limitations)  
-4. [Smart Contract](#smart-contract)
+  
+1. [Known Issues & Limitations](#known-issues--limitations) 
+2. [Smart Contract](#smart-contract) 
+3. [Requirements](#requirements)
+4. [Installation](#installation)  
 5. [Usage](#usage)  
    - [Scenario 1: If You Already Have rETH](#scenario-1-if-you-already-have-reth)  
    - [Scenario 2: Flashloan Approach](#scenario-2-flashloan-approach)  
 6. [Configuration](#configuration)  
 7. [Stretch Goals / Future Enhancements](#stretch-goals--future-enhancements)  
 8. [License](#license)
+
+---
+
+## Known Issues & Limitations
+
+- **Inefficient Large Arbitrage Swaps**  
+  Currently, the tool only integrates with Uniswap, making large arbitrage swaps inefficient. Future updates with aggregators (probably 1inch) will improve performance for bigger transactions.
+
+- **Profit Checks with Multiple Pools**  
+  When operating with low discounts and a large number of pools using the `--minipools` flag, the tool does not perform individual profit checks for each pool. This can lead to suboptimal profits across multiple pools. It is recommended to limit the number of pools in a single call to ensure better profitability at times of low discount. **This will improved in a further update**
+
+- **Lack of Comprehensive Tests**  
+  This initial version lacks thorough testing, especially for the local rETH functionality. Testing for the local rETH integration is planned and will be completed in the coming days to enhance reliability and stability.
+
+---
+
+## Smart Contract
+
+To execute a Flashswap with Uniswap and simultaneously burn rETH within a single transaction, we developed and deployed a custom smart contract. This contract is fully verified on Etherscan and can be viewed [here](https://etherscan.io/address/0xdb7DA96A75B43927Da9C0321cD2F82c430305CA0#code). 
+
+### Key Features
+- **No Approvals Required:** The contract operates without needing any external approvals, simplifying its usage and reducing potential points of failure.
+- **ETH-Free Transactions:** The transaction process does not involve sending any ETH, minimizing exposure to ETH-related risks.
+
+### Security Considerations
+While the smart contract is designed with streamlined functionality and minimal interaction with external elements, it presents a low-risk profile. However, it is important to note that this contract has not undergone a formal security audit. Users are encouraged to review the contract code on Etherscan and exercise caution when interacting with it. Always act based on your best knowledge and understanding, ensuring you are comfortable with the contract's operations and potential risks before proceeding.
 
 ---
 
@@ -66,8 +92,7 @@ For this initial version, **no binaries are provided**. You will need to **insta
 1. **Clone this repository**:
 
     ```bash
-    git clone https://github.com//0xtrooper/RocketpoolExitArbitrage.git
-    cd RocketpoolExitArbitrage
+    git clone https://github.com//0xtrooper/RocketpoolExitArbitrage.git && cd RocketpoolExitArbitrage    
     ```
 
 2. **Build the binary**:
@@ -76,40 +101,23 @@ For this initial version, **no binaries are provided**. You will need to **insta
     go build ./cmd/distribute/
     ```
 
+    **Note**: This will download the necessary packages if they are not already cached.
+
 3. **Run the CLI tool**:
 
     ```bash
     ./distribute --help
     ``` 
 
---
+---
 
-## Known Issues & Limitations
+## Usage
 
-- **Inefficient Large Arbitrage Swaps**  
-  Currently, the tool only integrates with Uniswap, making large arbitrage swaps inefficient. Future updates with aggregators (probably 1inch) will improve performance for bigger transactions.
+### Scenario 1: If You Already Have rETH
 
-- **Profit Checks with Multiple Pools**  
-  When operating with low discounts and a large number of pools using the `--minipools` flag, the tool does not perform individual profit checks for each pool. This can lead to suboptimal profits across multiple pools. It is recommended to limit the number of pools in a single call to ensure better profitability at times of low discount. **This will improved in a further update**
+### Scenario 2: Flashloan Approach
 
-- **Lack of Comprehensive Tests**  
-  This initial version lacks thorough testing, especially for the local rETH functionality. Testing for the local rETH integration is planned and will be completed in the coming days to enhance reliability and stability.
-
---
-
-## Smart Contract
-
-To execute a Flashswap with Uniswap and simultaneously burn rETH within a single transaction, we developed and deployed a custom smart contract. This contract is fully verified on Etherscan and can be viewed [here](https://etherscan.io/address/0xdb7DA96A75B43927Da9C0321cD2F82c430305CA0#code). 
-
-### Key Features
-- **No Approvals Required:** The contract operates without needing any external approvals, simplifying its usage and reducing potential points of failure.
-- **ETH-Free Transactions:** The transaction process does not involve sending any ETH, minimizing exposure to ETH-related risks.
-
-### Security Considerations
-While the smart contract is designed with streamlined functionality and minimal interaction with external elements, it presents a low-risk profile. However, it is important to note that this contract has not undergone a formal security audit. Users are encouraged to review the contract code on Etherscan and exercise caution when interacting with it. Always act based on your best knowledge and understanding, ensuring you are comfortable with the contract's operations and potential risks before proceeding.
-
-
---
+---
 
 ## Configuration
 
@@ -313,7 +321,7 @@ Future enhancements aim to improve the tool's functionality, efficiency, and rel
 
 These improvements are designed to address current limitations and provide a more robust and efficient user experience in upcoming releases.
 
---
+---
 
 ## License
 
