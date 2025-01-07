@@ -117,6 +117,44 @@ For this initial version, **no binaries are provided**. You will need to **insta
 
 ### Scenario 2: Flashloan Approach
 
+In this approach, the CLI constructs a transaction bundle that initially distributes all pools specified with the --minipool or --minipools flags. It then adds an arbitrage transaction calculated based on the total amount of ETH collected.
+
+The workflow proceeds as follows:
+
+**1. Simulation:** The constructed bundle is first simulated to estimate its profitability. If the expected profit falls below a predefined threshold, the process is automatically aborted to prevent unprofitable transactions.
+
+**2. Confirmation:** Once all calculations are complete, you will be prompted to confirm whether to proceed. This step allows you to verify that the ratios and amounts are accurate and meet your expectations.
+
+**3. Submission:** After confirmation, the bundle is sent to multiple relays and remains valid for inclusion in the next five blocks.
+
+**4. Inclusion Monitoring:** The script then monitors the network, waiting for the transactions within the bundle to be included in a block.
+
+Below is an example workflow for finalizing a single minipool:
+```
+ubuntu@rocketnode:~$ ./distribute --minipools 0x21...5a
+Updated flashbots fee refund recipient to node address (0x84...4E)
+Calculated distribution amounts: 8.003592 ETH send to NO, 24.006526 ETH send to RP
+
+Selected uniswap pool - 0x553e9C493678d8606d6a5ba284643dB2110Df823:
+    Swapping 23.906471 WETH to 21.331199 rETH at a secondary ratio of 1.12073
+
+Calculated rETH to burn: Burning 21.331199 rETH for 24.006526 ETH at a primary ratio of 1.12542.
+
+Calculated Arbitrage: expected profit (before fees) = 0.100055 ETH
+
+Current gas settings: base fee per gas is 7.19 gwei, tip is 0.10 gwei.
+Sending transaction with a base fee per gas of 10.79 gwei for timely inclusion.
+
+Simulated bundle (Success: true):
+    Expected profit after fees: 0.090342, with a tx fee of 0.009712
+    Expected profit after arbitrage fees: 0.095738, with a tx fee of 0.004317 (interesting if you want to distribute regardless)
+
+Do you want to proceed? (y/n): y
+Sent bundle with hash: 0xac...53. Waiting for up to one minute to see if the transaction is included...
+
+Distributed minipool! Arbitrage tx: https://etherscan.io/tx/0x24...a4
+```
+
 ---
 
 ## Configuration
