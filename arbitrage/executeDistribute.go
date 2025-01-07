@@ -15,6 +15,9 @@ import (
 	"log/slog"
 
 	"github.com/0xtrooper/flashbots_client"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/google/uuid"
 )
 
 func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn) error {
@@ -54,7 +57,6 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 		return errors.Join(errors.New("failed to simulate bundle"), err)
 	}
 
-
 	for _, tx := range res.Results {
 		if tx.Error != "" {
 			fmt.Println("error: ", tx.Error)
@@ -69,7 +71,7 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 	maxArbitrageFeesFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(maxArbitrageFees), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
 	expectedProfitFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(expectedProfit), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
 	fmt.Printf("Simulated bundle (Success: %t):\n", success)
-	fmt.Printf("    Expected profit after fees: %.6f, with a tx fee of %.6f\n", expectedProfitFloat-maxBundleFeesFloat, maxBundleFeesFloat)	
+	fmt.Printf("    Expected profit after fees: %.6f, with a tx fee of %.6f\n", expectedProfitFloat-maxBundleFeesFloat, maxBundleFeesFloat)
 	fmt.Printf("    Expected profit after arbitrage fees: %.6f, with a tx fee of %.6f (interesting if you want to distribute regardless)\n\n", expectedProfitFloat-maxArbitrageFeesFloat, maxArbitrageFeesFloat)
 
 	if dataIn.DryRun {
@@ -108,16 +110,52 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 		return errors.New("user did not confirm to proceed")
 	}
 
-	bundleHash, err := dataIn.FbClient.SendBundle(bundle)
+	// add more builders to improve chance to be included
+	networkID, err := dataIn.Client.NetworkID(ctx)
 	if err != nil {
-		return errors.Join(errors.New("failed to send bundle"), err)
+		return errors.Join(errors.New("failed to get network id"), err)
+	}
+	bundle.UseAllBuilders(networkID.Uint64())
+
+	// set target block number
+	blockNumber, err := dataIn.Client.BlockNumber(ctx)
+	if err != nil {
+		return errors.Join(errors.New("failed to get block number"), err)
+	}
+	bundle.SetTargetBlockNumber(blockNumber + 1)
+
+	// bundle is valid for one minutes
+	bundle.SetMaxTimestamp(uint64((time.Now().Add(time.Minute)).Unix()))
+
+	// set replacementUuid
+	uuid := uuid.New().String()
+	bundle.SetReplacementUuid(uuid)
+
+	// send 3 bundles
+	nextBundles, err := bundle.GetBundelsForNextNBlocks(2)
+	if err != nil {
+		return errors.Join(errors.New("failed to duplicate bundles for the next blocks"), err)
+	}
+
+	bundles := []flashbots_client.Bundle{*bundle}
+	bundles = append(bundles, nextBundles...)
+
+	var bundleHash common.Hash
+	for _, b := range bundles {
+		bundleHash, err = dataIn.FbClient.SendBundle(&b)
+		if err != nil {
+			return errors.Join(errors.New("failed to send bundle"), err)
+		}
 	}
 	fmt.Printf("Sent bundle with hash: %s. Waiting for up to one minute to see if the transaction is included...\n\n", bundleHash.Hex())
 
-	timeoutContext, cancel := context.WithTimeout(ctx, time.Minute*1)
-	defer cancel()
+	timeoutContext, cancel := context.WithTimeout(ctx, time.Second*60)
+	for _, b := range bundles {
+		waitForBundle(timeoutContext, logger, dataIn.Client, dataIn.FbClient, b)
+	}
 
 	success, err = dataIn.FbClient.WaitForBundleInclusion(timeoutContext, bundle)
+	cancel()
 	if err != nil {
 		return errors.Join(errors.New("failed to wait for bundle inclusion"), err)
 	}
@@ -125,7 +163,12 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 	if !success {
 		return errors.New("bundle was not included in the mempool")
 	}
-	
+
+	err = dataIn.FbClient.CancelBundle(uuid)
+	if err != nil {
+		logger.Debug("failed to cancel bundle", slog.String("error", err.Error()))
+	}
+
 	if len(res.Results) == 2 {
 		arbTx := res.Results[1]
 		fmt.Printf("Distributed minipool! Arbitrage tx: https://etherscan.io/tx/%s\n\n", arbTx.TxHash.Hex())
@@ -162,5 +205,54 @@ func waitForUserConfirmation() bool {
 	default:
 		fmt.Println("Invalid input. Please type 'y' or 'n'.")
 		return waitForUserConfirmation()
+	}
+}
+
+func waitForBundle(ctx context.Context, logger *slog.Logger, client *ethclient.Client, fbClient *flashbots_client.FlashbotsClient, bundle flashbots_client.Bundle) bool {
+	targetBlock := bundle.TargetBlockNumber()
+	logger.Debug("waiting for bundle inclusion", slog.Uint64("targetBlock", targetBlock))
+
+	var firstTime bool = true
+	for {
+		// 1. Check if the context has been canceled or timed out
+		select {
+		case <-ctx.Done():
+			logger.Debug("timed out waiting for bundle inclusion")
+			return false
+		default:
+			// continue
+		}
+
+		// 2. Check if the bundle has been included
+		success, err := fbClient.CheckBundleIncusion(ctx, &bundle)
+		if err != nil {
+			logger.Debug("failed to check bundle inclusion", slog.String("error", err.Error()))
+			return false
+		}
+
+		if success {
+			return true
+		}
+
+		// 3. Check bundle stats
+		stats, err := fbClient.GetBundleStatsV2(&bundle)
+		if err != nil {
+			logger.Debug("failed to get bundle stats", slog.String("error", err.Error()))
+			return false
+		}
+
+		if logger.Enabled(ctx, slog.LevelInfo) {
+			if !stats.IsSimulated {
+				fmt.Println("Bundle not yet seen by relay")
+			} else if firstTime {
+				fmt.Printf("Bundle was received at %s and simulated at %s\n", stats.ReceivedAt, stats.SimulatedAt)
+				firstTime = false
+			} else {
+				fmt.Printf("Bundle was considered by %d builders and sealed by %d builders\n",
+					len(stats.ConsideredByBuilders),
+					len(stats.SealedByBuilders),
+				)
+			}
+		}
 	}
 }
