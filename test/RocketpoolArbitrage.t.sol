@@ -68,7 +68,7 @@ contract RocketpoolExitArbitrageForkTest is Test {
         // 5) Execute the arb
         rocketpoolExitArb.arb(
             UNISWAP_RETH_WETH_POOL,
-            23901056713423835569,
+            23897692000000000000,
             58322582921635196
         );
 

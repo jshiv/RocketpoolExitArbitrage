@@ -3,7 +3,7 @@ module rocketpoolArbitrage
 go 1.22.3
 
 require (
-	github.com/0xtrooper/flashbots_client v0.1.0
+	github.com/0xtrooper/flashbots_client v0.2.0
 	github.com/ethereum/go-ethereum v1.14.12
 	golang.org/x/sync v0.7.0
 )
@@ -23,7 +23,7 @@ require (
 	github.com/ethereum/c-kzg-4844 v1.0.0 // indirect
 	github.com/ethereum/go-verkle v0.1.1-0.20240829091221-dffa7562dbe9 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
-	github.com/google/uuid v1.4.0 // indirect
+	github.com/google/uuid v1.4.0
 	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/holiman/uint256 v1.3.1 // indirect
 	github.com/klauspost/compress v1.17.2 // indirect

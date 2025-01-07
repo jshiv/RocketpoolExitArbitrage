@@ -127,7 +127,6 @@ func getExactOutput(ctx context.Context, client *ethclient.Client, zeroForOne bo
 	return result.AmountIn, nil
 }
 
-
 func getExactInput(ctx context.Context, client *ethclient.Client, zeroForOne bool, amount, fee *big.Int) (*big.Int, error) {
 	quoterABI, err := abi.JSON(strings.NewReader(helper.HelperABI))
 	if err != nil {
@@ -139,7 +138,7 @@ func getExactInput(ctx context.Context, client *ethclient.Client, zeroForOne boo
 		params = helper.IQuoterV2QuoteExactInputSingleParams{
 			TokenIn:           common.HexToAddress(rETHAddressStr),
 			TokenOut:          common.HexToAddress(WETHAddressStr),
-			AmountIn:            amount,
+			AmountIn:          amount,
 			Fee:               fee,
 			SqrtPriceLimitX96: big.NewInt(0), // No price limit
 		}
@@ -147,7 +146,7 @@ func getExactInput(ctx context.Context, client *ethclient.Client, zeroForOne boo
 		params = helper.IQuoterV2QuoteExactInputSingleParams{
 			TokenIn:           common.HexToAddress(WETHAddressStr),
 			TokenOut:          common.HexToAddress(rETHAddressStr),
-			AmountIn:            amount,
+			AmountIn:          amount,
 			Fee:               fee,
 			SqrtPriceLimitX96: big.NewInt(0), // No price limit
 		}
@@ -172,7 +171,7 @@ func getExactInput(ctx context.Context, client *ethclient.Client, zeroForOne boo
 	}
 
 	var result struct {
-		AmountOut                *big.Int
+		AmountOut               *big.Int
 		SqrtPriceX96After       *big.Int
 		InitializedTicksCrossed uint32
 		GasEstimate             *big.Int

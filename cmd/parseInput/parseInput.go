@@ -50,13 +50,12 @@ func Input(ctx context.Context, logger *slog.Logger) (data *arbitrage.DataIn, er
 
 	if *debugFlag {
 		slog.SetLogLoggerLevel(slog.LevelDebug)
-	} else {		
+	} else {
 		slog.SetLogLoggerLevel(slog.LevelInfo)
 	}
 
 	data.Command = *commandFlag
 	logger.Debug("command", slog.String("command", data.Command))
-
 
 	if *minipoolFlag == "" && *minipoolsFlag == "" {
 		return nil, errors.New("\"--minipool\" or \"--minipools\" is required")
@@ -72,7 +71,7 @@ func Input(ctx context.Context, logger *slog.Logger) (data *arbitrage.DataIn, er
 		logger.Debug("minipool", slog.String("minipool", common.HexToAddress(*minipoolFlag).Hex()))
 	}
 
-	if *minipoolsFlag != "" {		
+	if *minipoolsFlag != "" {
 		minipools := strings.Split(*minipoolsFlag, ",")
 		for _, minipool := range minipools {
 			minipool = strings.TrimSpace(minipool) // handle whitespace
@@ -159,7 +158,7 @@ func Input(ctx context.Context, logger *slog.Logger) (data *arbitrage.DataIn, er
 	logger.Debug("dryRunFlag", slog.Bool("dryRunFlag", data.DryRun))
 	logger.Debug("skipConfirmation", slog.Bool("skipConfirmation", data.SkipConfirmation))
 	logger.Debug("checkProfitFlag", slog.Bool("checkProfitFlag", data.CheckProfit))
-	logger.Debug("ignoreDistributeCostFlag", 
+	logger.Debug("ignoreDistributeCostFlag",
 		slog.Bool("checkProfitFlag", data.CheckProfit),
 		slog.Bool("ignoreDistributeCostFlag", data.CheckProfitIgnoreDistributeCost),
 	)
