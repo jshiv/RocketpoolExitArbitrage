@@ -108,8 +108,6 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 		return errors.New("user did not confirm to proceed")
 	}
 
-	return errors.New("DEBUG")
-
 	bundleHash, err := dataIn.FbClient.SendBundle(bundle)
 	if err != nil {
 		return errors.Join(errors.New("failed to send bundle"), err)
