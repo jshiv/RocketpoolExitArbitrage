@@ -86,12 +86,21 @@ func BuildCall(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashb
 		if err != nil {
 			return nil, nil, errors.Join(errors.New("failed to sign burn tx"), err)
 		}
-	
+
 		logger.Debug("signed burn tx", slog.String("txHash", signedBurnTx.Hash().Hex()))
 		txs = append(txs, signedBurnTx)
 	} else {
-		maxGasUsed := len(dataIn.MinipoolAddresses) * DISTRIBUTE_CALL_MAX_GAS + ARBITRAGE_CALL_MAX_GAS
-		minProfit := new(big.Int).Mul(baseGasBoosted, big.NewInt(int64(maxGasUsed)))
+		var minProfit *big.Int
+		if dataIn.CheckProfit {
+			maxGasUsed := len(dataIn.MinipoolAddresses)*DISTRIBUTE_CALL_MAX_GAS + ARBITRAGE_CALL_MAX_GAS
+			minProfit = new(big.Int).Mul(baseGasBoosted, big.NewInt(int64(maxGasUsed)))
+		} else {
+			if logger.Enabled(ctx, slog.LevelInfo) {
+				fmt.Println("Ignoring distribute cost, will distribute regardless of profit.")
+			}
+			minProfit = big.NewInt(0)
+		}
+
 		if logger.Enabled(ctx, slog.LevelDebug) {
 			minProfitFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(minProfit), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
 			logger.Debug("calculated min profit", slog.Float64("minProfit", minProfitFloat))
@@ -106,11 +115,10 @@ func BuildCall(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashb
 		if err != nil {
 			return nil, nil, errors.Join(errors.New("failed to sign arbitrage tx"), err)
 		}
-	
+
 		logger.Debug("signed arbitrage tx", slog.String("txHash", signedArbitrageTx.Hash().Hex()))
 		txs = append(txs, signedArbitrageTx)
 	}
-
 
 	bundle := flashbots_client.NewBundleWithTransactions(txs)
 
@@ -184,7 +192,7 @@ func calcualteArbitrageData(ctx context.Context, logger *slog.Logger, dataIn Dat
 	if err != nil {
 		return nil, nil, nil, common.Address{}, errors.Join(errors.New("failed to get best pool"), err)
 	}
-	
+
 	poolAmountInFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(uniswapReturnAmountWeth), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
 	poolAmountOutFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(rethToBurn), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
 	secondaryRatio := poolAmountInFloat / poolAmountOutFloat
@@ -211,15 +219,15 @@ func calcualteArbitrageData(ctx context.Context, logger *slog.Logger, dataIn Dat
 				poolAmountOutFloat,
 				secondaryRatio,
 			)
-	
+
 			// update user about the primary ratio
-			fmt.Printf("Calculated rETH to burn: Burning %.6f rETH for %.6f ETH at a primary ratio of %.5f.\n\n", 
+			fmt.Printf("Calculated rETH to burn: Burning %.6f rETH for %.6f ETH at a primary ratio of %.5f.\n\n",
 				rethToBurnFloat,
 				ethUnlockedFloat,
 				primaryRatio,
 			)
 		}
-	
+
 		return rethToBurn, new(big.Int).Sub(rETHShare, uniswapReturnAmountWeth), uniswapReturnAmountWeth, poolAddress, nil
 	}
 
