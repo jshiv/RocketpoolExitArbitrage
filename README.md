@@ -155,6 +155,14 @@ Sent bundle with hash: 0xac...53. Waiting for up to one minute to see if the tra
 Distributed minipool! Arbitrage tx: https://etherscan.io/tx/0x24...a4
 ```
 
+## Bundle Status Logging
+
+The script logs the status of bundles to provide clarity on their simulation and relay visibility.
+
+- `Bundle X: Not yet seen by relay`: The initial status indicating the bundle has not been processed yet.
+- `Bundle X: Received at a and simulated at b`:  The bundle has been processed and is ready for potential inclusion.
+- `Bundle X: Considered by n builders and sealed by m builders`: The bundle is under consideration and nearing inclusion.
+
 ---
 
 ## Configuration
