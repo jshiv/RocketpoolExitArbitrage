@@ -2,7 +2,8 @@
 
 > **WARNING**  
 > This software is an **initial version** and **has not been thoroughly tested**.  
-> Use **at your own risk**. We do **not** provide any guarantees or assume any liability for any potential losses or damages.  
+> Use at your own risk. No guarantees are provided, and we assume no liability for any potential losses or damages resulting from its use.
+> The flashloan functionality has been tested a few times, and there is some level of confidence in its performance (e.g., [example transaction](https://etherscan.io/tx/0xaa7cb0cb352661dadd2b1248895906b753433b43f5009c5db58ebe5718cfea7f)).
 > Always review the code and run your own tests before using it in a production environment.
 
 ---
@@ -150,18 +151,23 @@ Simulated bundle (Success: true):
     Expected profit after arbitrage fees: 0.095738, with a tx fee of 0.004317 (interesting if you want to distribute regardless)
 
 Do you want to proceed? (y/n): y
-Sent bundle with hash: 0xac...53. Waiting for up to one minute to see if the transaction is included...
 
-Distributed minipool! Arbitrage tx: https://etherscan.io/tx/0x24...a4
+Sent bundle with hash: 0xc384c1f82cf57bd203a45f0eb5a0a6ead9e09b4e89436d94fe5d8c3b8d482754. Waiting for up to one minute to see if the transaction is included...
+
+Bundle 1: Not yet seen by relay
+Bundle 2: Not yet seen by relay
+Bundle 2: Not yet seen by relay
+Distributed minipool! Arbitrage tx: https://etherscan.io/tx/0x65...5a
 ```
 
 ## Bundle Status Logging
 
 The script logs the status of bundles to provide clarity on their simulation and relay visibility.
 
-- `Bundle X: Not yet seen by relay`: The initial status indicating the bundle has not been processed yet.
-- `Bundle X: Received at a and simulated at b`:  The bundle has been processed and is ready for potential inclusion.
-- `Bundle X: Considered by n builders and sealed by m builders`: The bundle is under consideration and nearing inclusion.
+- `Bundle Nr. X: Not yet seen by relay`: The initial status indicating the bundle has not been processed yet.
+- `Bundle Nr. X: Received at a and simulated at b`:  The bundle has been processed and is ready for potential inclusion.
+- `Bundle Nr. X: Considered by n builders and sealed by m builders`: The bundle is under consideration and nearing inclusion.
+- `Bundle Nr. X: Target block reached`: Targetblock was reached and the transaction were not included in that block.
 
 ---
 

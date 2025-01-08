@@ -147,7 +147,7 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 			return errors.Join(errors.New("failed to send bundle"), err)
 		}
 	}
-	fmt.Printf("Sent bundle with hash: %s. Waiting for up to one minute to see if the transaction is included...\n\n", bundleHash.Hex())
+	fmt.Printf("\nSent bundle with hash: %s. Waiting for up to one minute to see if the transaction is included...\n\n", bundleHash.Hex())
 
 	var successfullyIncluded bool
 	timeoutContext, cancel := context.WithTimeout(ctx, time.Second*60)
@@ -249,15 +249,15 @@ func waitForBundle(ctx context.Context, logger *slog.Logger, client *ethclient.C
 
 		if logger.Enabled(ctx, slog.LevelInfo) {
 			if !stats.IsSimulated {
-				fmt.Printf("Bundle %d: Not yet seen by relay", number)		
+				fmt.Printf("Bundle Nr. %d: Not yet seen by relay\n", number + 1)		
 			} else {
 				if firstTime {
-					fmt.Printf("Bundle %d: Received at %s and simulated at %s\n", number, stats.ReceivedAt, stats.SimulatedAt)
+					fmt.Printf("Bundle Nr. %d: Received at %s and simulated at %s\n", number + 1, stats.ReceivedAt, stats.SimulatedAt)
 					firstTime = false
 				}
-				
-				fmt.Printf("Bundle %d: Considered by %d builders and sealed by %d builders\n",
-					number,
+
+				fmt.Printf("Bundle Nr. %d: Considered by %d builders and sealed by %d builders\n",
+					number + 1,
 					len(stats.ConsideredByBuilders),
 					len(stats.SealedByBuilders),
 				)
@@ -272,10 +272,11 @@ func waitForBundle(ctx context.Context, logger *slog.Logger, client *ethclient.C
 		}
 
 		if blockNumber >= targetBlock {
+			fmt.Printf("Bundle Nr. %d: Target block reached\n", number + 1)
 			logger.Debug("target block reached")
 			return false
 		}
 
-		time.Sleep(time.Millisecond * 500)
+		time.Sleep(time.Second * 3)
 	}
 }
