@@ -15,9 +15,6 @@ import (
 	"log/slog"
 
 	"github.com/0xtrooper/flashbots_client"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/google/uuid"
 )
 
 func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn) error {
@@ -124,43 +121,10 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 	}
 	bundle.SetTargetBlockNumber(blockNumber + 1)
 
-	// bundle is valid for one minutes
-	bundle.SetMaxTimestamp(uint64((time.Now().Add(time.Minute)).Unix()))
+	fmt.Printf("\nSent bundle with hash: %s. Waiting for up to one minute to see if the transaction is included...\n\n", res.BundleHash)
 
-	// set replacementUuid
-	uuid := uuid.New().String()
-	bundle.SetReplacementUuid(uuid)
-
-	// send 3 bundles
-	nextBundles, err := bundle.GetBundelsForNextNBlocks(2)
-	if err != nil {
-		return errors.Join(errors.New("failed to duplicate bundles for the next blocks"), err)
-	}
-
-	bundles := []flashbots_client.Bundle{*bundle}
-	bundles = append(bundles, nextBundles...)
-
-	var bundleHash common.Hash
-	for _, b := range bundles {
-		bundleHash, err = dataIn.FbClient.SendBundle(&b)
-		if err != nil {
-			return errors.Join(errors.New("failed to send bundle"), err)
-		}
-	}
-	fmt.Printf("\nSent bundle with hash: %s. Waiting for up to one minute to see if the transaction is included...\n\n", bundleHash.Hex())
-
-	var successfullyIncluded bool
 	timeoutContext, cancel := context.WithTimeout(ctx, time.Second*60)
-	for index, b := range bundles {
-		successfullyIncluded = waitForBundle(timeoutContext, logger, dataIn.Client, dataIn.FbClient, index, b)
-		if successfullyIncluded {
-			break
-		}		
-	}
-
-	if !successfullyIncluded {
-		successfullyIncluded, err = dataIn.FbClient.WaitForBundleInclusion(timeoutContext, bundle)
-	}
+	successfullyIncluded, err := dataIn.FbClient.SendNBundleAndWait(timeoutContext, bundle, 3)
 	cancel()
 	if err != nil {
 		return errors.Join(errors.New("failed to wait for bundle inclusion"), err)
@@ -170,11 +134,7 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 		return errors.New("bundle was not included in the mempool")
 	}
 
-	err = dataIn.FbClient.CancelBundle(uuid)
-	if err != nil {
-		logger.Debug("failed to cancel bundle", slog.String("error", err.Error()))
-	}
-
+	// print successful inclusion and tx link
 	if len(res.Results) == 2 {
 		arbTx := res.Results[1]
 		fmt.Printf("Distributed minipool! Arbitrage tx: https://etherscan.io/tx/%s\n\n", arbTx.TxHash.Hex())
@@ -211,72 +171,5 @@ func waitForUserConfirmation() bool {
 	default:
 		fmt.Println("Invalid input. Please type 'y' or 'n'.")
 		return waitForUserConfirmation()
-	}
-}
-
-func waitForBundle(ctx context.Context, logger *slog.Logger, client *ethclient.Client, fbClient *flashbots_client.FlashbotsClient, number int, bundle flashbots_client.Bundle) bool {
-	targetBlock := bundle.TargetBlockNumber()
-	logger.Debug("waiting for bundle inclusion", slog.Uint64("targetBlock", targetBlock))
-
-	var firstTime bool = true
-	for {
-		// 1. Check if the context has been canceled or timed out
-		select {
-		case <-ctx.Done():
-			logger.Debug("timed out waiting for bundle inclusion")
-			return false
-		default:
-			// continue
-		}
-
-		// 2. Check if the bundle has been included
-		success, err := fbClient.CheckBundleIncusion(ctx, &bundle)
-		if err != nil {
-			logger.Debug("failed to check bundle inclusion", slog.String("error", err.Error()))
-			return false
-		}
-
-		if success {
-			return true
-		}
-
-		// 3. Check bundle stats
-		stats, err := fbClient.GetBundleStatsV2(&bundle)
-		if err != nil {
-			logger.Debug("failed to get bundle stats", slog.String("error", err.Error()))
-			return false
-		}
-
-		if logger.Enabled(ctx, slog.LevelInfo) {
-			if !stats.IsSimulated {
-				fmt.Printf("Bundle Nr. %d: Not yet seen by relay\n", number + 1)		
-			} else {
-				if firstTime {
-					fmt.Printf("Bundle Nr. %d: Received at %s and simulated at %s\n", number + 1, stats.ReceivedAt, stats.SimulatedAt)
-					firstTime = false
-				}
-
-				fmt.Printf("Bundle Nr. %d: Considered by %d builders and sealed by %d builders\n",
-					number + 1,
-					len(stats.ConsideredByBuilders),
-					len(stats.SealedByBuilders),
-				)
-			}
-		}
-
-		// 4. Check if the target block has been reached
-		blockNumber, err := client.BlockNumber(ctx)
-		if err != nil {
-			logger.Debug("failed to get block number", slog.String("error", err.Error()))
-			return false
-		}
-
-		if blockNumber >= targetBlock {
-			fmt.Printf("Bundle Nr. %d: Target block reached\n", number + 1)
-			logger.Debug("target block reached")
-			return false
-		}
-
-		time.Sleep(time.Second * 3)
 	}
 }

@@ -149,7 +149,7 @@ func Input(ctx context.Context, logger *slog.Logger) (data *arbitrage.DataIn, er
 	}
 
 	logger.Debug("parsed ECDSA private key")
-	data.FbClient, err = flashbots_client.NewClient(data.Client, privateKey)
+	data.FbClient, err = flashbots_client.NewClient(logger, data.Client, privateKey)
 	if err != nil {
 		return nil, errors.Join(errors.New("failed to create flashbots client"), err)
 	}
