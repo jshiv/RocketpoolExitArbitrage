@@ -45,6 +45,7 @@ func Input(ctx context.Context, logger *slog.Logger) (data *arbitrage.DataIn, er
 	flag.BoolVar(&data.CheckProfit, "check-profit", true, "If enabled, reverts when the profit is too low. (Default: true)")
 	flag.BoolVar(&data.CheckProfitIgnoreDistributeCost, "ignoreDistributeCost", false, "Reverts when the profit is too low, but does not considering the distribute call(s). Best used if you want to distribute either way.")
 	flag.BoolVar(&data.DryRun, "dry-run", false, "Perform a dry run without sending the bundle to Flashbots; only print the transaction bundle.")
+	nodeAddressFlag := flag.String("node-address", "", "Node address used as caller. If not set, the first minipool's node address is used.")
 
 	flag.Parse()
 
@@ -152,6 +153,16 @@ func Input(ctx context.Context, logger *slog.Logger) (data *arbitrage.DataIn, er
 	data.FbClient, err = flashbots_client.NewClient(logger, data.Client, privateKey)
 	if err != nil {
 		return nil, errors.Join(errors.New("failed to create flashbots client"), err)
+	}
+
+	if *nodeAddressFlag != "" {
+		if !common.IsHexAddress(*nodeAddressFlag) {
+			return nil, errors.New("node address is invalid")
+		}
+
+		nodeAddress := common.HexToAddress(*nodeAddressFlag)
+		data.NodeAddress = &nodeAddress
+		logger.Debug("nodeAddress", slog.String("nodeAddress", nodeAddress.Hex()))
 	}
 
 	logger.Debug("localReth", slog.Bool("localReth", data.LocalReth))

@@ -5,11 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/big"
 	"rocketpoolArbitrage/rocketpoolContracts/minipoolDelegate"
 )
 
 func VerifyInputData(ctx context.Context, logger *slog.Logger, dataIn *DataIn) error {
 	logger.With(slog.String("function", "VerifyInputData"))
+
+	var verifyAllCallsFromNO bool
+	if dataIn.NodeAddress == nil {
+		verifyAllCallsFromNO = true
+	}
 
 	for _, minipoolAddress := range dataIn.MinipoolAddresses {
 		minipoolInstance, err := minipoolDelegate.NewMinipoolDelegate(minipoolAddress, dataIn.Client)
@@ -41,17 +47,36 @@ func VerifyInputData(ctx context.Context, logger *slog.Logger, dataIn *DataIn) e
 			return fmt.Errorf("%s: minipool is not staking", minipoolAddress)
 		}
 
-		// get node address
-		nodeAddress, err := GetMinipoolNodeAddress(ctx, minipoolInstance)
-		if err != nil {
-			return errors.Join(fmt.Errorf("%s: failed to get node address", minipoolAddress), err)
+		if verifyAllCallsFromNO {			
+			nodeAddress, err := GetMinipoolNodeAddress(ctx, minipoolInstance)
+			if err != nil {
+				return errors.Join(fmt.Errorf("%s: failed to get node address", minipoolAddress), err)
+			}
+
+			// first time we set the node address here
+			if dataIn.NodeAddress == nil {
+				dataIn.NodeAddress = &nodeAddress
+			} else if *dataIn.NodeAddress != nodeAddress {
+				return fmt.Errorf("%s: node address does not match", minipoolAddress)
+			}
 		}
 
-		if dataIn.NodeAddress == nil {
-			dataIn.NodeAddress = &nodeAddress
-		} else {
+
+		minipoolBalance, err := dataIn.Client.BalanceAt(ctx, minipoolAddress, nil)
+		if err != nil {
+			logger.Warn("failed to get minipool balance", slog.String("minipool", minipoolAddress.Hex()))
+			continue
+		}
+
+		if minipoolBalance.Cmp(big.NewInt(8e18)) > 0 {
+			// get node address
+			nodeAddress, err := GetMinipoolNodeAddress(ctx, minipoolInstance)
+			if err != nil {
+				return errors.Join(fmt.Errorf("%s: failed to get node address", minipoolAddress), err)
+			}
+
 			if *dataIn.NodeAddress != nodeAddress {
-				return fmt.Errorf("%s: node address does not match. Only supports calls from same node address", minipoolAddress)
+				return fmt.Errorf("%s: node address does not match. Minipools with over 8 ETH need to be finalized from the NO address", minipoolAddress)
 			}
 		}
 	}
