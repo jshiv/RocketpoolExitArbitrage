@@ -181,6 +181,12 @@ func calcualteArbitrageData(ctx context.Context, logger *slog.Logger, dataIn Dat
 		return nil, nil, nil, common.Address{}, errors.Join(errors.New("failed to calculate distributed balance"), err)
 	}
 
+	if dataIn.DryRun {
+		fmt.Println(string(colorRed), "If you want to use tenderly to simulate the arbitrage, you need to overwrite the state for the final transaction:")
+		fmt.Printf("    - Set the ETH balance of the rETH contract (%s) to %s\n", rEthContractAddressStr, rETHShare.String())
+		fmt.Println(string(colorReset))
+	}
+
 	// calcaulte amount rETH to burn
 	rethToBurn, err := ConvertWethToReth(ctx, dataIn.RETHInstance, rETHShare)
 	if err != nil {

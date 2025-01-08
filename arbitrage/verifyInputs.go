@@ -47,7 +47,7 @@ func VerifyInputData(ctx context.Context, logger *slog.Logger, dataIn *DataIn) e
 			return fmt.Errorf("%s: minipool is not staking", minipoolAddress)
 		}
 
-		if verifyAllCallsFromNO {			
+		if verifyAllCallsFromNO {
 			nodeAddress, err := GetMinipoolNodeAddress(ctx, minipoolInstance)
 			if err != nil {
 				return errors.Join(fmt.Errorf("%s: failed to get node address", minipoolAddress), err)
@@ -60,7 +60,6 @@ func VerifyInputData(ctx context.Context, logger *slog.Logger, dataIn *DataIn) e
 				return fmt.Errorf("%s: node address does not match", minipoolAddress)
 			}
 		}
-
 
 		minipoolBalance, err := dataIn.Client.BalanceAt(ctx, minipoolAddress, nil)
 		if err != nil {

@@ -67,28 +67,30 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 	maxBundleFeesFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(maxBundleFees), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
 	maxArbitrageFeesFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(maxArbitrageFees), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
 	expectedProfitFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(expectedProfit), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
-	fmt.Printf("Simulated bundle (Success: %t):\n", success)
+	fmt.Print("Simulated bundle (")
+	if success {
+		fmt.Print(string(colorGreen), "success", string(colorReset))
+	} else {
+		fmt.Print(string(colorRed), "failed", string(colorReset))
+	}
+	fmt.Println("): ")
 	fmt.Printf("    Expected profit after fees: %.6f, with a tx fee of %.6f\n", expectedProfitFloat-maxBundleFeesFloat, maxBundleFeesFloat)
 	fmt.Printf("    Expected profit after arbitrage fees: %.6f, with a tx fee of %.6f (interesting if you want to distribute regardless)\n\n", expectedProfitFloat-maxArbitrageFeesFloat, maxArbitrageFeesFloat)
 
 	if dataIn.DryRun {
 		txs := bundle.Transactions()
-		fmt.Println("Dry run. Would have sent the following bundle:\n[")
+		fmt.Println("Dry run. Would have sent the following bundle:")
 		for i, tx := range txs {
-			binary, err := tx.MarshalBinary()
-			if err != nil {
-				return errors.Join(errors.New("error marshalling transaction"), err)
-			}
-
-			txHex := "0x" + hex.EncodeToString(binary)
-			fmt.Print("    \"" + txHex + "\"")
-			if i != len(txs)-1 {
-				fmt.Println(",")
-			} else {
-				fmt.Println()
-			}
+			fmt.Printf("Transaction %d:\n", i+1)
+			fmt.Printf("    From: %s\n", dataIn.NodeAddress.Hex())
+			fmt.Printf("    To: %s\n", tx.To().Hex())
+			fmt.Printf("    Value: %s\n", tx.Value().String())
+			fmt.Printf("    Gas Limit: %d\n", tx.Gas())
+			fmt.Printf("    Base Fee: %s\n", tx.GasFeeCap().String())
+			fmt.Printf("    Priority Fee: %s\n", tx.GasTipCap().String())
+			fmt.Printf("    Nonce: %d\n", tx.Nonce())
+			fmt.Printf("    Data: %s\n", hex.EncodeToString(tx.Data()))
 		}
-		fmt.Println("]")
 		return nil
 	}
 
