@@ -118,7 +118,7 @@ For this initial version, **no binaries are provided**. You will need to **insta
 
 ### Scenario 2: Flashloan Approach
 
-In this approach, the CLI constructs a transaction bundle that initially distributes all pools specified with the --minipool or --minipools flags. It then adds an arbitrage transaction calculated based on the total amount of ETH collected.
+In this approach, the CLI constructs a transaction bundle that initially distributes all pools specified with the flags. It then adds an arbitrage transaction calculated based on the total amount of ETH collected. When using smartnode with the default docker configuration, you usually only need to add the address (`--minipool` or `--minipools`). If you modifyed the default port, use the  `--rpc-port` flag to set the new port. If you have an external eth1 client, use the `--rpc` flag. 
 
 The workflow proceeds as follows:
 
@@ -152,22 +152,39 @@ Simulated bundle (Success: true):
 
 Do you want to proceed? (y/n): y
 
-Sent bundle with hash: 0xc384c1f82cf57bd203a45f0eb5a0a6ead9e09b4e89436d94fe5d8c3b8d482754. Waiting for up to one minute to see if the transaction is included...
+Sent bundle with hash: 0xca...54. Waiting for up to one minute to see if the transaction is included...
 
-Bundle 1: Not yet seen by relay
-Bundle 2: Not yet seen by relay
-Bundle 2: Not yet seen by relay
 Distributed minipool! Arbitrage tx: https://etherscan.io/tx/0x65...5a
 ```
 
 ## Bundle Status Logging
 
-The script logs the status of bundles to provide clarity on their simulation and relay visibility.
+When using the `--debug` option, the tool provides detailed updates about the bundle status. For example, the output could look like this:
+```
+Sent bundle with hash: 0x46...d6. Waiting for up to one minute to see if the transaction is included...
 
-- `Bundle Nr. X: Not yet seen by relay`: The initial status indicating the bundle has not been processed yet.
-- `Bundle Nr. X: Received at a and simulated at b`:  The bundle has been processed and is ready for potential inclusion.
-- `Bundle Nr. X: Considered by n builders and sealed by m builders`: The bundle is under consideration and nearing inclusion.
-- `Bundle Nr. X: Target block reached`: Targetblock was reached and the transaction were not included in that block.
+2025/01/08 13:18:40 DEBUG start waiting for bundle inclusion module=distribute module=flashbots_client targetBlock=21580006
+2025/01/08 13:18:41 DEBUG Bundle received and simulated module=distribute module=flashbots_client targetBlock=21580006 receivedAt=2025-01-08T13:18:39.908Z simulatedAt=2025-01-08T13:18:39.914Z
+2025/01/08 13:18:41 DEBUG Bundle considered or sealed by builders module=distribute module=flashbots_client targetBlock=21580006 consideredByBuilders=0 sealedByBuilders=0
+2025/01/08 13:18:42 DEBUG Bundle considered or sealed by builders module=distribute module=flashbots_client targetBlock=21580006 consideredByBuilders=0 sealedByBuilders=0
+2025/01/08 13:18:43 DEBUG Bundle considered or sealed by builders module=distribute module=flashbots_client targetBlock=21580006 consideredByBuilders=0 sealedByBuilders=0
+2025/01/08 13:18:44 DEBUG Bundle considered or sealed by builders module=distribute module=flashbots_client targetBlock=21580006 consideredByBuilders=0 sealedByBuilders=0
+2025/01/08 13:18:45 DEBUG Bundle considered or sealed by builders module=distribute module=flashbots_client targetBlock=21580006 consideredByBuilders=0 sealedByBuilders=0
+2025/01/08 13:18:47 DEBUG Bundle considered or sealed by builders module=distribute module=flashbots_client targetBlock=21580006 consideredByBuilders=0 sealedByBuilders=0
+2025/01/08 13:18:48 DEBUG Bundle considered or sealed by builders module=distribute module=flashbots_client targetBlock=21580006 consideredByBuilders=0 sealedByBuilders=0
+2025/01/08 13:18:49 DEBUG Bundle considered or sealed by builders module=distribute module=flashbots_client targetBlock=21580006 consideredByBuilders=12 sealedByBuilders=12
+Distributed minipool! Arbitrage tx: https://etherscan.io/tx/0x0c..35
+```
+
+The log output is in a structured logging format with timestamps and values displayed in a `key=value` format. Below is an explanation of the main log messages:
+- `start waiting for bundle inclusion`: 
+    - Printed for each monitored bundle (usually three bundles).
+    - Indicates the tool has started monitoring the bundle's status.
+- `Bundle received and simulated`: 
+        - Indicates the bundle was processed by the relay, and the simulation was successful.
+- `Bundle considered or sealed by builders`: 
+    - This is a periodic log (usually printed every second).
+    - It shows how many builders are considering the bundle and the likelihood of its inclusion in the target block.
 
 ---
 
@@ -240,6 +257,8 @@ This CLI tool is configured primarily through command-line flags. Below is a lis
   ```bash
   ./distribute --command="docker exec my_node /go/bin/rocketpool"
   ```
+
+If you are not using the Rocket Pool smartnode Docker version, this flag allows you to specify the alternative command used to make the node sign the transaction. The specified command will be executed in the following format: `<command> api node sign <unsignedTx>`
 
 ---
 
