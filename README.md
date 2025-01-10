@@ -43,9 +43,6 @@ The core objective is to leverage **distribute** calls in combination with **rET
 
 ## Known Issues & Limitations
 
-- **Inefficient Large Arbitrage Swaps**  
-  Currently, the tool only integrates with Uniswap, making large arbitrage swaps inefficient. Future updates with aggregators (probably 1inch) will improve performance for bigger transactions.
-
 - **Profit Checks with Multiple Pools**  
   When operating with low discounts and a large number of pools using the `--minipools` flag, the tool does not perform individual profit checks for each pool. This can lead to suboptimal profits across multiple pools. It is recommended to limit the number of pools in a single call to ensure better profitability at times of low discount. **This will improved in a further update**
 
@@ -56,11 +53,13 @@ The core objective is to leverage **distribute** calls in combination with **rET
 
 ## Smart Contract
 
-To execute a Flashswap with Uniswap and simultaneously burn rETH within a single transaction, we developed and deployed a custom smart contract. This contract is fully verified on Etherscan and can be viewed [here](https://etherscan.io/address/0xdb7DA96A75B43927Da9C0321cD2F82c430305CA0#code). 
+To execute a Flashswap with Uniswap and simultaneously burn rETH within a single transaction, we developed and deployed a custom smart contract. This contract is fully verified on Etherscan and can be viewed [here](https://etherscan.io/address/0x228125B5519861a9176c1E4b12beeb2d41142D92#code). The contract provides two functions. The first (`arb`) executes a flash swap arbitrage call using Uniswap. The second (`arbParaswap`) allows users to take a flash loan via [Morpho](https://morpho.org/) and perform an aggregated swap using Paraswap.
+
 
 ### Key Features
 - **No Approvals Required:** The contract operates without needing any external approvals, simplifying its usage and reducing potential points of failure.
 - **ETH-Free Transactions:** The transaction process does not involve sending any ETH, minimizing exposure to ETH-related risks.
+- **Profit Receiver:** The user can decide to send the profit to an external wallet directly (withdrawal wallet by default).
 
 ### Security Considerations
 While the smart contract is designed with streamlined functionality and minimal interaction with external elements, it presents a low-risk profile. However, it is important to note that this contract has not undergone a formal security audit. Users are encouraged to review the contract code on Etherscan and exercise caution when interacting with it. Always act based on your best knowledge and understanding, ensuring you are comfortable with the contract's operations and potential risks before proceeding.
@@ -208,6 +207,22 @@ This CLI tool is configured primarily through command-line flags. Below is a lis
 
 ---
 
+## Protocol
+
+- **Flag**: `--protocol`  
+    **Type**: string  
+    **Default**: `best`  
+    **Description**: Protocol to use for arbitrage. Options: `best`, `uniswap`, `paraswap`.  
+    - `best` or `b`: Fetches both variants and suggests the more profitable one.
+    - `uniswap` or `u`: Uses the Uniswap protocol to execute a flash swap.
+    - `paraswap` or `p`: Uses the Morpho as flash loan provider and Paraswap for the swapping.  
+    **Example**:
+    ```bash
+    ./distribute --protocol="uniswap"
+    ```
+
+---
+
 ## Minipool (Single)
 
 - **Flag**: `--minipool`  
@@ -231,6 +246,32 @@ This CLI tool is configured primarily through command-line flags. Below is a lis
   ```bash
   ./distribute --minipools="0xABC123...,0xDEF456...,0x789ABC..."
   ```
+
+---
+
+## Receiver Address
+
+- **Flag**: `--receiver`  
+    **Type**: string  
+    **Default**: (empty)  
+    **Description**: Specifies the receiver address for the arbitrage profits. If not set, the node address is used by default. This address will also receive any Flashbots gas refunds (if applicable) when no personal searcher key is used. If the `--receiver` flag is not provided, the withdrawal address of the node (specified by the `--node-address` flag) will be used.  
+    **Example**:
+    ```bash
+    ./distribute --receiver="0xYourReceiverAddress"
+    ```
+
+---
+
+## Node Address
+
+- **Flag**: `--node-address`
+    **Type**: string  
+    **Default**: (empty)  
+    **Description**: Specifies the node address used as the caller to sign the transactions. If not set, the first minipool's node address is used by default. This flag should only be needed in edge cases, use carefully.  
+    **Example**:
+    ```bash
+    ./distribute --node-address="0xYourNodeAddress"
+    ```
 
 ---
 
@@ -259,19 +300,6 @@ This CLI tool is configured primarily through command-line flags. Below is a lis
   ```
 
 If you are not using the Rocket Pool smartnode Docker version, this flag allows you to specify the alternative command used to make the node sign the transaction. The specified command will be executed in the following format: `<command> api node sign <unsignedTx>`
-
----
-
-## Flashbots Gas Refund Address
-
-- **Flag**: `--refund-address`  
-  **Type**: string  
-  **Default**: (empty; if not set, a random searcher address is generated)  
-  **Description**: Address to receive gas refunds from Flashbots. Flashbots users are automatically eligible to receive gas fee refunds. If Flashbots can include a bundle on chain for a lower price, you are eligible to receive a refund. Those are automatically paid without one week. For more information: https://docs.flashbots.net/flashbots-auction/advanced/gas-fee-refunds
-  **Example**:
-  ```bash
-  ./distribute --refund-address="0x12345..."
-  ```
 
 ---
 
@@ -381,8 +409,6 @@ This example enables debug logs, uses local rETH and specifies multiple minipool
 ## Stretch Goals / Future Enhancements
 
 Future enhancements aim to improve the tool's functionality, efficiency, and reliability:
-
-- **Integration with Aggregators:** Currently, the tool only integrates with Uniswap, which limits the efficiency of large arbitrage swaps. Integrating with aggregators such as 1inch is planned to enhance performance for larger transactions. This integration will require an additional smart contract to utilize flash loans.
 
 - **Individual Profit Checks for Multiple Pools:** When operating with low discounts and a high number of pools using the `--minipools` flag, individual profit checks for each pool are not performed, potentially leading to suboptimal profits. Implementing individual profit checks will ensure better profitability when managing multiple pools. As this feature is only needed for low discount situations, it is currently skipped (at the time of writing, there is a -0.4% discount).
 
