@@ -9,12 +9,20 @@ import (
 	"log"
 	"math/big"
 	"os"
+	"rocketpoolArbitrage/rocketpoolContracts/storage"
 	"strings"
 	"time"
 
 	"log/slog"
 
 	"github.com/0xtrooper/flashbots_client"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/ethclient"
+)
+
+const (
+	rocketpoolStorageAddressStr = "0x1d8f8f00cfa6758d7bE78336684788Fb0ee0Fa46"
 )
 
 func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn) error {
@@ -27,20 +35,39 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 
 	logger.Debug("verified input data")
 
-	if dataIn.RefundAddress != nil {
-		err = dataIn.FbClient.UpdateFeeRefundRecipient(*dataIn.RefundAddress)
+	// get node withdraw address
+	isWithdrawalAddress := false
+	if dataIn.ReceiverAddress == nil {
+		withdrawalAddress, err := getWithdrawalAddress(ctx, dataIn.Client, *dataIn.NodeAddress)
+		if err != nil {
+			return errors.Join(errors.New("failed to get withdrawal address"), err)
+		}
+
+		logger.Debug("receiver address not set, updated to withdraw address", slog.String("receiverAddress", withdrawalAddress.Hex()))
+		dataIn.ReceiverAddress = &withdrawalAddress
+		isWithdrawalAddress = true
+	}
+
+	if logger.Enabled(ctx, slog.LevelInfo) {
+		fmt.Print("Any profit will be sent to ")
+		fmt.Print(colorOrange, (*dataIn.ReceiverAddress).Hex(), colorReset)
+		if isWithdrawalAddress {
+			fmt.Println(". This should be your withdrawal address.")
+		} else {
+			fmt.Println(". Set with the --receiver flag.")
+		}
+	}
+
+	if dataIn.RandomPrivateKey {
+		err = dataIn.FbClient.UpdateFeeRefundRecipient(*dataIn.ReceiverAddress)
 		if err != nil {
 			return errors.Join(errors.New("failed to update flashbots fee refund recipient"), err)
 		}
-
-		fmt.Printf("Updated flashbots fee refund recipient to supplied recipient (%s)\n", (*dataIn.RefundAddress).Hex())
-	} else if dataIn.RandomPrivateKey {
-		err := dataIn.FbClient.UpdateFeeRefundRecipient(*dataIn.NodeAddress)
-		if err != nil {
-			return errors.Join(errors.New("failed to update flashbots fee refund recipient to node address"), err)
+		if logger.Enabled(ctx, slog.LevelInfo) {
+			fmt.Print("Updated flashbots fee refund recipient to ")
+			fmt.Print(colorOrange, (*dataIn.ReceiverAddress).Hex(), colorReset)
+			fmt.Println(".")
 		}
-
-		fmt.Printf("Updated flashbots fee refund recipient to node address (%s)\n", (*dataIn.NodeAddress).Hex())
 	}
 
 	bundle, expectedProfit, err := BuildCall(ctx, logger, *dataIn)
@@ -181,4 +208,27 @@ func waitForUserConfirmation() bool {
 		fmt.Println("Invalid input. Please type 'y' or 'n'.")
 		return waitForUserConfirmation()
 	}
+}
+
+func getWithdrawalAddress(ctx context.Context, client *ethclient.Client, nodeAddress common.Address) (common.Address, error) {
+	rocketpoolStorageAddress := common.HexToAddress(rocketpoolStorageAddressStr)
+
+	storageInterface, err := storage.NewStorage(rocketpoolStorageAddress, client)
+	if err != nil {
+		return common.Address{}, errors.Join(errors.New("failed to create storage contract instance"), err)
+	}
+
+	timoutCtx, cancel := context.WithTimeout(ctx, time.Second*5)
+	defer cancel()
+
+	opts := &bind.CallOpts{
+		Pending: false,
+		Context: timoutCtx,
+	}
+	
+	address, err := storageInterface.GetNodeWithdrawalAddress(opts, nodeAddress)
+	if err != nil {
+		return common.Address{}, errors.Join(errors.New("failed to get node withdrawal address"), err)
+	}
+	return address, nil
 }

@@ -25,7 +25,6 @@ type DataIn struct {
 	MinipoolAddresses               []common.Address
 	NodeAddress                     *common.Address
 	ReceiverAddress                 *common.Address
-	RefundAddress                   *common.Address
 	RETHInstance                    *rETH.RETH
 	Client                          *ethclient.Client
 	FbClient                        *flashbots_client.FlashbotsClient

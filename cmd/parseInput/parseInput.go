@@ -36,7 +36,6 @@ func Input(ctx context.Context, logger *slog.Logger) (data *arbitrage.DataIn, er
 	flag.BoolVar(&data.LocalReth, "local-reth", false, "Use existing local rETH instead of taking a flashloan. If false, the CLI attempts a flashloan")
 	minipoolFlag := flag.String("minipool", "", "Single minipool address to distribute. Use --minipools for multiple.")
 	minipoolsFlag := flag.String("minipools", "", "Comma-separated list of minipool addresses to distribute.")
-	gasFeeRefundAddressFlag := flag.String("refund-address", "", "Address to receive Flashbots gas refunds. Defaults to a random searcher address if not set.")
 	SercherPrivateKeyFlag := flag.String("searcher-private-key", "", "Private key for the searcher used in Flashbots transactions. If not set, a random key is generated.")
 	rpcFlag := flag.String("rpc", "http://localhost:8545", "Ethereum RPC endpoint for all on-chain calls. (default: http://localhost:8545)")
 	rpcPortFlag := flag.String("rpc-port", "8545", "If using localhost but on a non-default port, override the port here.")
@@ -123,16 +122,6 @@ func Input(ctx context.Context, logger *slog.Logger) (data *arbitrage.DataIn, er
 	data.RETHInstance, err = rETH.NewRETH(common.HexToAddress(rETHAddressStr), data.Client)
 	if err != nil {
 		return nil, err
-	}
-
-	if *gasFeeRefundAddressFlag != "" {
-		if !common.IsHexAddress(*gasFeeRefundAddressFlag) {
-			return nil, errors.New("refund address is invalid")
-		}
-
-		refundRecipient := common.HexToAddress(*gasFeeRefundAddressFlag)
-		data.RefundAddress = &refundRecipient
-		logger.Debug("refundAddress", slog.String("refundAddress", refundRecipient.Hex()))
 	}
 
 	var privateKey *ecdsa.PrivateKey

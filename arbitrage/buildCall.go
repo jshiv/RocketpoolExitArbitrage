@@ -103,7 +103,7 @@ func BuildCall(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashb
 			profitFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(paraswapData.expectedProfitAfterFees), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
 			secondaryRatio := amountWethFloat / amountRethFloat
 			// update user about the secondary ratio
-			fmt.Printf("Paraswap: Swapping %.6f WETH to %.6f rETH at a secondary ratio of %.5f with a minimum profit of %.6f\n",
+			fmt.Printf("Paraswap: Swapping %.6f WETH to %.6f rETH at a secondary ratio of %.5f with a minimum profit of %.6f.\n",
 				amountWethFloat,
 				amountRethFloat,
 				secondaryRatio,
@@ -154,14 +154,7 @@ func BuildCall(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashb
 			logger.Debug("calculated min profit", slog.Float64("minProfit", minProfitFloat))
 		}
 
-		var address common.Address
-		if dataIn.ReceiverAddress != nil {
-			address = *dataIn.ReceiverAddress
-		} else {
-			address = *dataIn.NodeAddress
-		}
-
-		rawArbitrageTx, err := generateArbitrageCall(address, nonce+uint64(count), uniswapData, minProfit, baseGasBoosted, tipGas)
+		rawArbitrageTx, err := generateArbitrageCall(nonce+uint64(count), uniswapData, minProfit, baseGasBoosted, tipGas, *dataIn.ReceiverAddress)
 		if err != nil {
 			return nil, nil, errors.Join(errors.New("failed to generate arbitrage call"), err)
 		}
@@ -191,14 +184,7 @@ func BuildCall(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashb
 			logger.Debug("calculated min profit", slog.Float64("minProfit", minProfitFloat))
 		}
 
-		var address common.Address
-		if dataIn.ReceiverAddress != nil {
-			address = *dataIn.ReceiverAddress
-		} else {
-			address = *dataIn.NodeAddress
-		}
-
-		rawArbitrageTx, err := generateParaswapArbitrageCall(address, nonce+uint64(count), paraswapData, minProfit, baseGasBoosted, tipGas)
+		rawArbitrageTx, err := generateParaswapArbitrageCall(nonce+uint64(count), paraswapData, minProfit, baseGasBoosted, tipGas, *dataIn.ReceiverAddress)
 		if err != nil {
 			return nil, nil, errors.Join(errors.New("failed to generate paraswap call"), err)
 		}
@@ -266,7 +252,7 @@ func calcaulteDistributedBalance(ctx context.Context, logger *slog.Logger, dataI
 
 	totalNodeShareFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(totalNodeShare), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
 	rETHShareFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(totalDistributeAmount), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
-	fmt.Printf("Calculated distribution amounts: %.6f ETH send to NO, %.6f ETH send to RP\n\n", totalNodeShareFloat, rETHShareFloat)
+	fmt.Printf("Calculated distribution amounts: %.6f ETH sent to NO, %.6f ETH sent to rETH contract.\n\n", totalNodeShareFloat, rETHShareFloat)
 
 	return totalDistributeAmount, nil
 }
@@ -431,7 +417,7 @@ func generateDistributeCall(nonce uint64, minipoolAddress common.Address, baseGa
 	return types.NewTx(dynTx), nil
 }
 
-func generateArbitrageCall(receiver common.Address, nonce uint64, uniswapData *UniswapArbitrage, minProfit, baseGas, tipGas *big.Int) (*types.Transaction, error) {
+func generateArbitrageCall(nonce uint64, uniswapData *UniswapArbitrage, minProfit, baseGas, tipGas *big.Int, receiver common.Address) (*types.Transaction, error) {
 	arbitrageAbi, err := abi.JSON(strings.NewReader(contract.ContractABI))
 	if err != nil {
 		return nil, errors.Join(errors.New("failed to get arbitrage ABI"), err)
@@ -458,7 +444,7 @@ func generateArbitrageCall(receiver common.Address, nonce uint64, uniswapData *U
 	return types.NewTx(dynTx), nil
 }
 
-func generateParaswapArbitrageCall(receiver common.Address, nonce uint64, paraswapData *ParaswapArbitrage, minProfit, baseGas, tipGas *big.Int) (*types.Transaction, error) {
+func generateParaswapArbitrageCall(nonce uint64, paraswapData *ParaswapArbitrage, minProfit, baseGas, tipGas *big.Int, receiver common.Address) (*types.Transaction, error) {
 	arbitrageAbi, err := abi.JSON(strings.NewReader(contract.ContractABI))
 	if err != nil {
 		return nil, errors.Join(errors.New("failed to get arbitrage ABI"), err)
