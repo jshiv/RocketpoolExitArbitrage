@@ -44,30 +44,31 @@ func GetBestPool(ctx context.Context, logger *slog.Logger, client *ethclient.Cli
 		return common.Address{}, nil, errors.Join(errors.New("failed to get pool A"), err)
 	}
 
-	poolBAmountIn, err := getExactOutput(ctx, client, zeroForOne, amount, big.NewInt(500))
-	if err != nil {
-		return common.Address{}, nil, errors.Join(errors.New("failed to get pool B"), err)
-	}
-
 	if logger.Enabled(ctx, slog.LevelDebug) {
 		poolAAmountFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(poolAAmountIn), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
 		logger.Debug("0.01 percent pool", slog.String("address", PoolB), slog.Float64("Amount In", poolAAmountFloat))
+	}
+
+	poolBAmountIn, err := getExactOutput(ctx, client, zeroForOne, amount, big.NewInt(500))
+	if err != nil {
+		// the pool B has a rather low liquidity - 200k USD per side as of 10.01.2025
+		// if we get an error this is probably cause by the low liquidity
+		// therefor we only log it as a warning and default back to pool A
+		logger.Warn("failed to get uniswap estimation - possible too low liquidty", slog.String("pool", PoolB))
+		return common.HexToAddress(PoolA), poolAAmountIn, nil
+	}
+
+	if logger.Enabled(ctx, slog.LevelDebug) {
 		poolBAmountInFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(poolBAmountIn), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
 		logger.Debug("0.05 percent pool", slog.String("address", PoolA), slog.Float64("Amount In", poolBAmountInFloat))
 	}
 
-	var poolAddress common.Address
-	var poolAmountIn *big.Int
 	// return pool with lowest amount in
 	if poolAAmountIn.Cmp(poolBAmountIn) < 0 {
-		poolAddress = common.HexToAddress(PoolA)
-		poolAmountIn = poolAAmountIn
+		return common.HexToAddress(PoolA), poolAAmountIn, nil
 	} else {
-		poolAddress = common.HexToAddress(PoolB)
-		poolAmountIn = poolBAmountIn
+		return common.HexToAddress(PoolB), poolBAmountIn, nil
 	}
-
-	return poolAddress, poolAmountIn, nil
 }
 
 func getExactOutput(ctx context.Context, client *ethclient.Client, zeroForOne bool, amount, fee *big.Int) (*big.Int, error) {

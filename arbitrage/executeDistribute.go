@@ -54,11 +54,10 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 		return errors.Join(errors.New("failed to simulate bundle"), err)
 	}
 
-	for _, tx := range res.Results {
+	for index, tx := range res.Results {
 		if tx.Error != "" {
-			fmt.Println("error: ", tx.Error)
-			fmt.Println("revert reason: ", tx.RevertReason)
-			return fmt.Errorf("bundle error: %s", tx.Error)
+			logger.Warn("tx failed", slog.Int("index", index), slog.String("error", tx.Error), slog.String("revertReason", hex.EncodeToString([]byte(tx.RevertReason))))
+			success = false
 		}
 	}
 
@@ -73,7 +72,7 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 	} else {
 		fmt.Print(string(colorRed), "failed", string(colorReset))
 	}
-	fmt.Println("): ")
+	fmt.Println("):")
 	fmt.Printf("    Expected profit after fees: %.6f, with a tx fee of %.6f\n", expectedProfitFloat-maxBundleFeesFloat, maxBundleFeesFloat)
 	fmt.Printf("    Expected profit after arbitrage fees: %.6f, with a tx fee of %.6f (interesting if you want to distribute regardless)\n\n", expectedProfitFloat-maxArbitrageFeesFloat, maxArbitrageFeesFloat)
 
@@ -81,17 +80,25 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 		txs := bundle.Transactions()
 		fmt.Println("Dry run. Would have sent the following bundle:")
 		for i, tx := range txs {
+			baseGwei, _ := new(big.Float).Quo(new(big.Float).SetInt(tx.GasFeeCap()), new(big.Float).SetInt(big.NewInt(1e9))).Float64()
+			tipGwei, _ := new(big.Float).Quo(new(big.Float).SetInt(tx.GasTipCap()), new(big.Float).SetInt(big.NewInt(1e9))).Float64()
+
 			fmt.Printf("Transaction %d:\n", i+1)
 			fmt.Printf("    From: %s\n", dataIn.NodeAddress.Hex())
 			fmt.Printf("    To: %s\n", tx.To().Hex())
 			fmt.Printf("    Value: %s\n", tx.Value().String())
 			fmt.Printf("    Gas Limit: %d\n", tx.Gas())
-			fmt.Printf("    Base Fee: %s\n", tx.GasFeeCap().String())
-			fmt.Printf("    Priority Fee: %s\n", tx.GasTipCap().String())
+			fmt.Printf("    Base Fee: %s (%.2f Gwei)\n", tx.GasFeeCap().String(), baseGwei)
+			fmt.Printf("    Priority Fee: %s (%.4f Gwei)\n", tx.GasTipCap().String(), tipGwei)
 			fmt.Printf("    Nonce: %d\n", tx.Nonce())
 			fmt.Printf("    Data: %s\n", hex.EncodeToString(tx.Data()))
 		}
 		return nil
+	}
+
+	// end the attempt if the simulation failed - after printing the dryrun if it was requested!
+	if !success {
+		return errors.New("bundle simulation failed")
 	}
 
 	// this checks if a bundle makes sense to make arbitrage profits

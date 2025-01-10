@@ -23,31 +23,59 @@ interface IUniswapV3SwapCallbackReceiver {
     function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata data) external;
 }
 
+interface IMorphoBase {
+    /// @notice Executes a flash loan.
+    /// @dev Flash loans have access to the whole balance of the contract (the liquidity and deposited collateral of all
+    /// markets combined, plus donations).
+    /// @dev Warning: Not ERC-3156 compliant but compatibility is easily reached:
+    /// - `flashFee` is zero.
+    /// - `maxFlashLoan` is the token's balance of this contract.
+    /// - The receiver of `assets` is the caller.
+    /// @param token The token to flash loan.
+    /// @param assets The amount of assets to flash loan.
+    /// @param data Arbitrary data to pass to the `onMorphoFlashLoan` callback.
+    function flashLoan(address token, uint256 assets, bytes calldata data) external;
+}
+
+/// @title IMorphoFlashLoanCallback
+/// @notice Interface that users willing to use `flashLoan`'s callback must implement.
+interface IMorphoFlashLoanCallback {
+    /// @notice Callback called when a flash loan occurs.
+    /// @dev The callback is called only if data is not empty.
+    /// @param assets The amount of assets that was flash loaned.
+    /// @param data Arbitrary data passed to the `flashLoan` function.
+    function onMorphoFlashLoan(uint256 assets, bytes calldata data) external;
+}
+
 interface IWETH {
     function transfer(address recipient, uint256 amount) external returns (bool);
 
     function deposit() external payable;
     function withdraw(uint wad) external;
+    function approve(address spender, uint256 amount) external returns (bool);
 }
 
 interface IRETH {
     function transfer(address recipient, uint256 amount) external returns (bool);
+    function balanceOf(address account) external view returns (uint256);
 
     function burn(uint256 _rethAmount) external;
     function getTotalCollateral() external view returns (uint256);
     function getEthValue(uint256 _rethAmount) external view returns (uint256);
 }
 
-contract RocketpoolExitArbitrage is IUniswapV3SwapCallbackReceiver {
+contract RocketpoolExitArbitrage is IUniswapV3SwapCallbackReceiver, IMorphoFlashLoanCallback {
     IWETH public constant WETH = IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
     IRETH public constant RETH = IRETH(0xae78736Cd615f374D3085123A210448E74Fc6393);
     address immutable rocketStorage = 0x1d8f8f00cfa6758d7bE78336684788Fb0ee0Fa46;
     bytes32 constant depositPoolKey = keccak256("contract.addressrocketDepositPool");
+    IMorphoBase immutable Morpho = IMorphoBase(0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb);
+    address immutable Paraswap = 0x6A000F20005980200259B80c5102003040001068;
     
     uint160 internal constant MIN_SQRT_RATIO = 4295128739;
     uint160 internal constant MAX_SQRT_RATIO = 1461446703485210103287273052203988822378723970342;
 
-    event Arbitrage(address indexed caller, address indexed uniswapPool, uint256 amount, uint256 profit);
+    event Arbitrage(address indexed caller, address indexed receiver, address uniswapPool, uint256 amount, uint256 profit);
 
     constructor() {}
 
@@ -58,7 +86,7 @@ contract RocketpoolExitArbitrage is IUniswapV3SwapCallbackReceiver {
     /// @param _uniswapPool The address of the Uniswap V3 pool to trade rETH for ETH
     /// @param _amount The amount of rETH to withdraw from RocketPool
     /// @param _minProfit The minimum amount of profit to keep, otherwise revert
-    function arb(address _uniswapPool, uint256 _amount, uint256 _minProfit) external {
+    function arb(address _uniswapPool, uint256 _amount, uint256 _minProfit, address _receiver) external {
         IUniswap(_uniswapPool).swap(
             address(this),
             false, // zeroForOne
@@ -68,11 +96,11 @@ contract RocketpoolExitArbitrage is IUniswapV3SwapCallbackReceiver {
         );
 
         uint256 profit = address(this).balance;
-        require(profit >= _minProfit, "arbitrageWithdrawUniswap: Profit too low");
-        (bool success, ) = payable(msg.sender).call{value: profit}("");
+        require(profit >= _minProfit, "Profit too low");
+        (bool success, ) = payable(_receiver).call{value: profit}("");
         require(success, "Transfer failed.");
 
-        emit Arbitrage(msg.sender, _uniswapPool, _amount, profit);
+        emit Arbitrage(msg.sender, _receiver, _uniswapPool, _amount, profit);
     }
 
     // see: https://github.com/Uniswap/v3-core/blob/main/contracts/interfaces/callback/IUniswapV3SwapCallback.sol
@@ -101,5 +129,29 @@ contract RocketpoolExitArbitrage is IUniswapV3SwapCallbackReceiver {
 
         // 3rd: Repay the pool to complete the swap
         WETH.transfer(uniswapPool, uint256(_amountWETHDelta));
+    }
+
+    function arbParaswap(uint256 _amount, bytes calldata _data, uint256 _minProfit, address _receiver) external {
+        Morpho.flashLoan(address(WETH), _amount, _data);
+
+        uint256 profit = address(this).balance;
+        require(profit >= _minProfit, "Profit too low");
+        (bool success, ) = payable(_receiver).call{value: profit}("");
+        require(success, "Transfer failed.");
+
+        emit Arbitrage(msg.sender, _receiver, address(Morpho), _amount, profit);
+    }
+
+    function onMorphoFlashLoan(uint256 amountWethBorrowed, bytes calldata data) external override {
+        WETH.approve(0x6A000F20005980200259B80c5102003040001068, amountWethBorrowed);
+
+        (bool success, ) = Paraswap.call(data);
+        require(success, "Paraswap failed");
+
+        uint rethBalance = RETH.balanceOf(address(this));
+        RETH.burn(rethBalance);
+
+        WETH.deposit{value: amountWethBorrowed}();
+        WETH.approve(msg.sender, amountWethBorrowed);
     }
 }

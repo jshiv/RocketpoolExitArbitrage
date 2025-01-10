@@ -46,6 +46,8 @@ func Input(ctx context.Context, logger *slog.Logger) (data *arbitrage.DataIn, er
 	flag.BoolVar(&data.CheckProfitIgnoreDistributeCost, "ignoreDistributeCost", false, "Reverts when the profit is too low, but does not considering the distribute call(s). Best used if you want to distribute either way.")
 	flag.BoolVar(&data.DryRun, "dry-run", false, "Perform a dry run without sending the bundle to Flashbots; only print the transaction bundle.")
 	nodeAddressFlag := flag.String("node-address", "", "Node address used as caller. If not set, the first minipool's node address is used.")
+	protocolFlag := flag.String("protocol", "best", "Protocol to use for arbitrage. Options: best, uniswap, paraswap")
+	receiverFlag := flag.String("receiver", "", "Receiver address for the arbitrage. If not set, the node address is used.")
 
 	flag.Parse()
 
@@ -163,6 +165,27 @@ func Input(ctx context.Context, logger *slog.Logger) (data *arbitrage.DataIn, er
 		nodeAddress := common.HexToAddress(*nodeAddressFlag)
 		data.NodeAddress = &nodeAddress
 		logger.Debug("nodeAddress", slog.String("nodeAddress", nodeAddress.Hex()))
+	}
+
+	switch *protocolFlag {
+	case "best", "b":
+		data.Protocol = arbitrage.BestProtocol
+	case "uniswap", "u":
+		data.Protocol = arbitrage.UniswapProtocol
+	case "paraswap", "p":
+		data.Protocol = arbitrage.ParaswapProtocol
+	default:
+		return nil, errors.New("invalid protocol - Options: best, uniswap, paraswap")
+	}
+
+	if *receiverFlag != "" {
+		if !common.IsHexAddress(*receiverFlag) {
+			return nil, errors.New("receiver address is invalid")
+		}
+
+		receiverAddress := common.HexToAddress(*receiverFlag)
+		data.ReceiverAddress = &receiverAddress
+		logger.Debug("receiverAddress", slog.String("receiverAddress", receiverAddress.Hex()))
 	}
 
 	logger.Debug("localReth", slog.Bool("localReth", data.LocalReth))

@@ -1,13 +1,16 @@
 package arbitrage
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math/big"
+	"net/http"
 	"os/exec"
 	"rocketpoolArbitrage/arbitrage/contract"
 	"rocketpoolArbitrage/rocketpoolContracts/minipoolDelegate"
@@ -26,26 +29,19 @@ import (
 )
 
 const (
-	BURN_CALL_MAX_GAS       = 200000 // roughly 140k to burn
-	ARBITRAGE_CALL_MAX_GAS  = 300000 // roughly uniswap 180k + burn 140k - warm access
-	DISTRIBUTE_CALL_MAX_GAS = 500000 // roughly 400k
+	BURN_CALL_MAX_GAS               = 200000 // roughly 140k to burn
+	ARBITRAGE_UNISWAP_CALL_MAX_GAS  = 325000 // roughly uniswap 180k + burn 140k - warm access
+	DISTRIBUTE_CALL_MAX_GAS         = 500000 // roughly 400k
+	ARBITRAGE_PARASWAP_CALL_MAX_GAS = 750000 // in case there is a complicated path, reserve more gas
 
-	arbitrageContractAddressStr = "0x241bfb6e47d478456bf20aad81ecb512aed223c8"
+	arbitrageContractAddressStr = "0x228125B5519861a9176c1E4b12beeb2d41142D92"
 	rEthContractAddressStr      = "0xae78736Cd615f374D3085123A210448E74Fc6393"
+	WETHContractAddressStr      = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+	ParaswapV6_2AddressStr      = "0x6a000f20005980200259b80c5102003040001068"
 )
 
 func BuildCall(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashbots_client.Bundle, *big.Int, error) {
 	logger.With(slog.String("function", "BuildCall"))
-
-	rethToBurn, expectedProfit, swapAmount, poolAddress, err := calcualteArbitrageData(ctx, logger, dataIn)
-	if err != nil {
-		return nil, nil, errors.Join(errors.New("failed to calculate arbitrage data"), err)
-	}
-
-	if logger.Enabled(ctx, slog.LevelInfo) {
-		expectedProfitFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(expectedProfit), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
-		fmt.Printf("Calculated Arbitrage: expected profit (before fees) = %.6f ETH\n\n", expectedProfitFloat)
-	}
 
 	baseGas, tipGas, err := getCurrentGasSettings(ctx, dataIn.Client)
 	if err != nil {
@@ -73,9 +69,60 @@ func BuildCall(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashb
 		return nil, nil, errors.Join(errors.New("failed to generate distribute calls"), err)
 	}
 
+	rethToBurn, uniswapData, paraswapData, err := calcualteArbitrageData(ctx, logger, dataIn)
+	if err != nil {
+		return nil, nil, errors.Join(errors.New("failed to calculate arbitrage data"), err)
+	}
+
+	disributeFee := len(dataIn.MinipoolAddresses) * DISTRIBUTE_CALL_MAX_GAS
+	uniswapData.expectedFee = disributeFee + ARBITRAGE_UNISWAP_CALL_MAX_GAS
+	uniswapData.expectedProfitAfterFees = new(big.Int).Sub(uniswapData.expectedProfit, big.NewInt(int64(uniswapData.expectedFee)))
+	paraswapData.expectedFee = disributeFee + ARBITRAGE_PARASWAP_CALL_MAX_GAS
+	paraswapData.expectedProfitAfterFees = new(big.Int).Sub(paraswapData.expectedProfit, big.NewInt(int64(paraswapData.expectedFee)))
+
+	uniswapIsBetter := uniswapData.expectedProfitAfterFees.Cmp(paraswapData.expectedProfitAfterFees) >= 0
+
+	if logger.Enabled(ctx, slog.LevelInfo) {
+		if dataIn.Protocol == UniswapProtocol || dataIn.Protocol == BestProtocol {
+			amountWethFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(uniswapData.swapInAmountWeth), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
+			amountRethFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(uniswapData.swapOutAmountReth), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
+			profitFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(uniswapData.expectedProfitAfterFees), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
+			secondaryRatio := amountWethFloat / amountRethFloat
+			// update user about the secondary ratio
+			fmt.Printf("Uniswap: Swapping %.6f WETH to %.6f rETH at a secondary ratio of %.5f with a minimum profit of %.6f. (pool %s)\n",
+				amountWethFloat,
+				amountRethFloat,
+				secondaryRatio,
+				profitFloat,
+				uniswapData.poolAddress.String(),
+			)
+		}
+		if dataIn.Protocol == ParaswapProtocol || dataIn.Protocol == BestProtocol {
+			amountWethFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(paraswapData.swapInAmountWeth), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
+			amountRethFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(paraswapData.swapOutAmountReth), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
+			profitFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(paraswapData.expectedProfitAfterFees), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
+			secondaryRatio := amountWethFloat / amountRethFloat
+			// update user about the secondary ratio
+			fmt.Printf("Paraswap: Swapping %.6f WETH to %.6f rETH at a secondary ratio of %.5f with a minimum profit of %.6f\n",
+				amountWethFloat,
+				amountRethFloat,
+				secondaryRatio,
+				profitFloat,
+			)
+		}
+		if dataIn.Protocol == BestProtocol {
+			if uniswapIsBetter {
+				fmt.Println("Uniswap is better, will use Uniswap.")
+			} else {
+				fmt.Println("Paraswap is better, will use Paraswap.")
+			}
+		}
+		fmt.Println() // newline
+	}
+
+	expectedProfit := big.NewInt(0)
 	count := len(txs)
 	logger.Debug("signed distribute txs", slog.Int("count", count))
-
 	if dataIn.LocalReth {
 		rawBurnTx, err := generateBurnCall(nonce+uint64(count), rethToBurn, baseGasBoosted, tipGas)
 		if err != nil {
@@ -89,11 +136,12 @@ func BuildCall(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashb
 
 		logger.Debug("signed burn tx", slog.String("txHash", signedBurnTx.Hash().Hex()))
 		txs = append(txs, signedBurnTx)
-	} else {
+	} else if dataIn.Protocol == UniswapProtocol || (dataIn.Protocol == BestProtocol && uniswapIsBetter) {
+		expectedProfit = new(big.Int).Sub(uniswapData.expectedProfit, big.NewInt(int64(uniswapData.expectedFee)))
+
 		var minProfit *big.Int
 		if dataIn.CheckProfit {
-			maxGasUsed := len(dataIn.MinipoolAddresses)*DISTRIBUTE_CALL_MAX_GAS + ARBITRAGE_CALL_MAX_GAS
-			minProfit = new(big.Int).Mul(baseGasBoosted, big.NewInt(int64(maxGasUsed)))
+			minProfit = big.NewInt(int64(uniswapData.expectedFee))
 		} else {
 			if logger.Enabled(ctx, slog.LevelInfo) {
 				fmt.Println("Ignoring distribute cost, will distribute regardless of profit.")
@@ -106,7 +154,14 @@ func BuildCall(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashb
 			logger.Debug("calculated min profit", slog.Float64("minProfit", minProfitFloat))
 		}
 
-		rawArbitrageTx, err := generateArbitrageCall(nonce+uint64(count), poolAddress, swapAmount, minProfit, baseGasBoosted, tipGas)
+		var address common.Address
+		if dataIn.ReceiverAddress != nil {
+			address = *dataIn.ReceiverAddress
+		} else {
+			address = *dataIn.NodeAddress
+		}
+
+		rawArbitrageTx, err := generateArbitrageCall(address, nonce+uint64(count), uniswapData, minProfit, baseGasBoosted, tipGas)
 		if err != nil {
 			return nil, nil, errors.Join(errors.New("failed to generate arbitrage call"), err)
 		}
@@ -118,6 +173,47 @@ func BuildCall(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashb
 
 		logger.Debug("signed arbitrage tx", slog.String("txHash", signedArbitrageTx.Hash().Hex()))
 		txs = append(txs, signedArbitrageTx)
+	} else if dataIn.Protocol == ParaswapProtocol || (dataIn.Protocol == BestProtocol && !uniswapIsBetter) {
+		expectedProfit = new(big.Int).Sub(paraswapData.expectedProfit, big.NewInt(int64(paraswapData.expectedFee)))
+
+		var minProfit *big.Int
+		if dataIn.CheckProfit {
+			minProfit = big.NewInt(int64(paraswapData.expectedFee))
+		} else {
+			if logger.Enabled(ctx, slog.LevelInfo) {
+				fmt.Println("Ignoring distribute cost, will distribute regardless of profit.")
+			}
+			minProfit = big.NewInt(0)
+		}
+
+		if logger.Enabled(ctx, slog.LevelDebug) {
+			minProfitFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(minProfit), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
+			logger.Debug("calculated min profit", slog.Float64("minProfit", minProfitFloat))
+		}
+
+		var address common.Address
+		if dataIn.ReceiverAddress != nil {
+			address = *dataIn.ReceiverAddress
+		} else {
+			address = *dataIn.NodeAddress
+		}
+
+		rawArbitrageTx, err := generateParaswapArbitrageCall(address, nonce+uint64(count), paraswapData, minProfit, baseGasBoosted, tipGas)
+		if err != nil {
+			return nil, nil, errors.Join(errors.New("failed to generate paraswap call"), err)
+		}
+
+		signedParaswapTx, err := signTransaction(logger, dataIn.Command, rawArbitrageTx)
+		if err != nil {
+			return nil, nil, errors.Join(errors.New("failed to sign paraswap tx"), err)
+		}
+
+		logger.Debug("signed arbitrage tx", slog.String("txHash", signedParaswapTx.Hash().Hex()))
+		txs = append(txs, signedParaswapTx)
+	} else {
+		fmt.Println("Protocol picked: ", dataIn.Protocol)
+		fmt.Println("Uniswap is better: ", uniswapIsBetter)
+		return nil, nil, errors.New("invalid protocol")
 	}
 
 	bundle := flashbots_client.NewBundleWithTransactions(txs)
@@ -175,10 +271,10 @@ func calcaulteDistributedBalance(ctx context.Context, logger *slog.Logger, dataI
 	return totalDistributeAmount, nil
 }
 
-func calcualteArbitrageData(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*big.Int, *big.Int, *big.Int, common.Address, error) {
+func calcualteArbitrageData(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*big.Int, *UniswapArbitrage, *ParaswapArbitrage, error) {
 	rETHShare, err := calcaulteDistributedBalance(ctx, logger, dataIn)
 	if err != nil {
-		return nil, nil, nil, common.Address{}, errors.Join(errors.New("failed to calculate distributed balance"), err)
+		return nil, nil, nil, errors.Join(errors.New("failed to calculate distributed balance"), err)
 	}
 
 	if dataIn.DryRun {
@@ -190,53 +286,65 @@ func calcualteArbitrageData(ctx context.Context, logger *slog.Logger, dataIn Dat
 	// calcaulte amount rETH to burn
 	rethToBurn, err := ConvertWethToReth(ctx, dataIn.RETHInstance, rETHShare)
 	if err != nil {
-		return nil, nil, nil, common.Address{}, errors.Join(errors.New("failed to convert rETH to WETH"), err)
+		return nil, nil, nil, errors.Join(errors.New("failed to convert rETH to WETH"), err)
 	}
+
+	logger.Debug("calculated rETH to burn", slog.String("rethToBurn", rethToBurn.String()))
 
 	// get best pool to swap rETH
 	poolAddress, uniswapReturnAmountWeth, err := uniswap.GetBestPoolWithdrawArb(ctx, logger, dataIn.Client, rethToBurn)
 	if err != nil {
-		return nil, nil, nil, common.Address{}, errors.Join(errors.New("failed to get best pool"), err)
+		return nil, nil, nil, errors.Join(errors.New("failed to get best pool"), err)
 	}
 
-	poolAmountInFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(uniswapReturnAmountWeth), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
-	poolAmountOutFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(rethToBurn), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
-	secondaryRatio := poolAmountInFloat / poolAmountOutFloat
-
-	rethToBurnFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(rethToBurn), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
-	ethUnlockedFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(rETHShare), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
-	primaryRatio := ethUnlockedFloat / rethToBurnFloat
-
-	uniswapReturnAmountWeth = new(big.Int).Sub(uniswapReturnAmountWeth, big.NewInt(5))
 
 	// early exit if we use the users rETH
 	if dataIn.LocalReth {
 		if logger.Enabled(ctx, slog.LevelInfo) {
+			poolAmountInFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(uniswapReturnAmountWeth), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
+			poolAmountOutFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(rethToBurn), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
+			secondaryRatio := poolAmountInFloat / poolAmountOutFloat
+		
+			rethToBurnFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(rethToBurn), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
+			ethUnlockedFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(rETHShare), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
+			primaryRatio := ethUnlockedFloat / rethToBurnFloat
+
 			fmt.Printf("At the secondary ratio of %f, you would swap %.6f rETH to %.6f WETH\n\n", secondaryRatio, poolAmountOutFloat, poolAmountInFloat)
 			fmt.Printf("At the primary ratio of %f, you will burn %.6f rETH for %.6f ETH\n\n", primaryRatio, rethToBurnFloat, ethUnlockedFloat)
 		}
-		return rethToBurn, new(big.Int).Sub(rETHShare, uniswapReturnAmountWeth), big.NewInt(0), common.Address{}, nil
-	} else {
-		if logger.Enabled(ctx, slog.LevelInfo) {
-			// update user about the secondary ratio
-			fmt.Printf("Selected uniswap pool - %s:\n", poolAddress.String())
-			fmt.Printf("    Swapping %.6f WETH to %.6f rETH at a secondary ratio of %.5f\n\n",
-				poolAmountInFloat,
-				poolAmountOutFloat,
-				secondaryRatio,
-			)
-
-			// update user about the primary ratio
-			fmt.Printf("Calculated rETH to burn: Burning %.6f rETH for %.6f ETH at a primary ratio of %.5f.\n\n",
-				rethToBurnFloat,
-				ethUnlockedFloat,
-				primaryRatio,
-			)
-		}
-
-		return rethToBurn, new(big.Int).Sub(rETHShare, uniswapReturnAmountWeth), uniswapReturnAmountWeth, poolAddress, nil
+		return rethToBurn, nil, nil, nil
 	}
 
+	if logger.Enabled(ctx, slog.LevelInfo) {		
+		rethToBurnFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(rethToBurn), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
+		ethUnlockedFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(rETHShare), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
+		primaryRatio := ethUnlockedFloat / rethToBurnFloat
+
+		// update user about the primary ratio
+		fmt.Printf("Calculated rETH to burn: Burning %.6f rETH for %.6f ETH at a primary ratio of %.5f.\n\n",
+			rethToBurnFloat,
+			ethUnlockedFloat,
+			primaryRatio,
+		)
+	}
+
+	uniswapReturnAmountWeth = new(big.Int).Sub(uniswapReturnAmountWeth, big.NewInt(5))
+	dataUniswap := UniswapArbitrage{
+		poolAddress:       poolAddress,
+		swapInAmountWeth:  uniswapReturnAmountWeth,
+		swapOutAmountReth: rethToBurn,
+		expectedProfit:    new(big.Int).Sub(rETHShare, uniswapReturnAmountWeth),
+	}
+
+	// fetch paraswap data
+	dataParaswap, err := fetchParaswapData(ctx, logger, rethToBurn, dataIn.NodeAddress)
+	if err != nil {
+		return nil, nil, nil, errors.Join(errors.New("failed to fetch paraswap data"), err)
+	}
+
+	dataParaswap.expectedProfit = new(big.Int).Sub(rETHShare, dataParaswap.swapInAmountWeth)
+
+	return rethToBurn, &dataUniswap, dataParaswap, nil
 }
 
 func getCurrentGasSettings(ctx context.Context, client *ethclient.Client) (baseGas *big.Int, tipGas *big.Int, err error) {
@@ -323,13 +431,13 @@ func generateDistributeCall(nonce uint64, minipoolAddress common.Address, baseGa
 	return types.NewTx(dynTx), nil
 }
 
-func generateArbitrageCall(nonce uint64, uniswapPool common.Address, amountWethToTrade, minProfit, baseGas, tipGas *big.Int) (*types.Transaction, error) {
+func generateArbitrageCall(receiver common.Address, nonce uint64, uniswapData *UniswapArbitrage, minProfit, baseGas, tipGas *big.Int) (*types.Transaction, error) {
 	arbitrageAbi, err := abi.JSON(strings.NewReader(contract.ContractABI))
 	if err != nil {
 		return nil, errors.Join(errors.New("failed to get arbitrage ABI"), err)
 	}
 
-	callData, err := arbitrageAbi.Pack("arb", uniswapPool, amountWethToTrade, minProfit)
+	callData, err := arbitrageAbi.Pack("arb", uniswapData.poolAddress, uniswapData.swapInAmountWeth, minProfit, receiver)
 	if err != nil {
 		return nil, fmt.Errorf("failed to pack function data: %v", err)
 	}
@@ -343,7 +451,40 @@ func generateArbitrageCall(nonce uint64, uniswapPool common.Address, amountWethT
 		GasTipCap: tipGas,
 		To:        &arbitrageContractAddress,
 		Value:     big.NewInt(0),
-		Gas:       ARBITRAGE_CALL_MAX_GAS,
+		Gas:       ARBITRAGE_UNISWAP_CALL_MAX_GAS,
+		Data:      callData,
+	}
+
+	return types.NewTx(dynTx), nil
+}
+
+func generateParaswapArbitrageCall(receiver common.Address, nonce uint64, paraswapData *ParaswapArbitrage, minProfit, baseGas, tipGas *big.Int) (*types.Transaction, error) {
+	arbitrageAbi, err := abi.JSON(strings.NewReader(contract.ContractABI))
+	if err != nil {
+		return nil, errors.Join(errors.New("failed to get arbitrage ABI"), err)
+	}
+
+	// fmt.Println("Paraswap calldata:")
+	// fmt.Println("    amount: ", paraswapData.swapInAmountWeth.String())
+	// fmt.Println("    calldata: ", hex.EncodeToString(paraswapData.calldata))
+	// fmt.Println("	 minProfit: ", minProfit.String())
+	// fmt.Println("	 receiver: ", receiver.String())
+
+	callData, err := arbitrageAbi.Pack("arbParaswap", paraswapData.swapInAmountWeth, paraswapData.calldata, minProfit, receiver)
+	if err != nil {
+		return nil, fmt.Errorf("failed to pack function data: %v", err)
+	}
+
+	arbitrageContractAddress := common.HexToAddress(arbitrageContractAddressStr)
+
+	dynTx := &types.DynamicFeeTx{
+		ChainID:   big.NewInt(1),
+		Nonce:     nonce,
+		GasFeeCap: baseGas,
+		GasTipCap: tipGas,
+		To:        &arbitrageContractAddress,
+		Value:     big.NewInt(0),
+		Gas:       ARBITRAGE_PARASWAP_CALL_MAX_GAS,
 		Data:      callData,
 	}
 
@@ -420,4 +561,154 @@ func signTransaction(logger *slog.Logger, apiCommand string, tx *types.Transacti
 	}
 
 	return &signedTx, nil
+}
+
+func fetchParaswapData(ctx context.Context, logger *slog.Logger, amount *big.Int, userAddress *common.Address) (*ParaswapArbitrage, error) {
+	urlPrices := fmt.Sprintf("https://api.paraswap.io/prices?network=1&version=6.2&slippage=50&srcToken=%s&srcDecimals=18&destToken=%s&destDecimals=18&amount=%s&side=BUY&userAddress=%s",
+		WETHContractAddressStr,
+		rEthContractAddressStr,
+		amount.String(),
+		arbitrageContractAddressStr,
+	)
+
+	reqPrices, err := http.NewRequest("GET", urlPrices, nil)
+	if err != nil {
+		return nil, errors.Join(errors.New("failed to create request"), err)
+	}
+
+	reqPrices.Header.Add("Content-Type", "application/json")
+	reqPrices.Header.Add("Accept", "application/json")
+
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+	respPrices, err := client.Do(reqPrices)
+	if err != nil {
+		return nil, errors.Join(errors.New("failed to send request"), err)
+	}
+
+	bodyPrices, err := io.ReadAll(respPrices.Body)
+	if err != nil {
+		return nil, errors.Join(errors.New("failed to read response body"), err)
+	}
+
+	var errResp ParaswapErrorResponse
+	err = json.Unmarshal(bodyPrices, &errResp)
+	if err != nil {
+		return nil, errors.Join(errors.New("failed to unmarshal error response body"), err)
+	}
+
+	if errResp.Error != "" {
+		return nil, fmt.Errorf("paraswap API error: %s", errResp.Error)
+	}
+
+	var prices ParaswapPriceResponse
+	err = json.Unmarshal(bodyPrices, &prices)
+	if err != nil {
+		return nil, errors.Join(errors.New("failed to unmarshal response body"), err)
+	}
+
+	if logger.Enabled(ctx, slog.LevelDebug) {
+		amountIn, _ := new(big.Int).SetString(prices.PriceRoute.SrcAmount, 10)
+		amountOut, _ := new(big.Int).SetString(prices.PriceRoute.DestAmount, 10)
+
+		amountInFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(amountIn), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
+		amountOutFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(amountOut), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
+		ratio := amountInFloat / amountOutFloat
+
+		logger.Debug("fetched paraswap prices, building transacton next",
+			slog.Float64("amountIn", amountInFloat),
+			slog.Float64("amountOut", amountOutFloat),
+			slog.Float64("ratio", ratio),
+		)
+	}
+
+	// Unmarshal bodyPrices to extract the inner "priceRoute"
+	var rawResponse map[string]json.RawMessage
+	err = json.Unmarshal(bodyPrices, &rawResponse)
+	if err != nil {
+		return nil, errors.Join(errors.New("failed to unmarshal bodyPrices"), err)
+	}
+
+	// Extract the "priceRoute" field
+	innerPriceRoute, ok := rawResponse["priceRoute"]
+	if !ok {
+		return nil, errors.New("priceRoute field not found in bodyPrices")
+	}
+
+	urlTransaction := "https://api.paraswap.io/transactions/1?onlyParams=true&ignoreChecks=true&ignoreGasEstimate=true"
+
+	transactionsBody := ParaswapTransactionsBody{
+		SrcToken:     prices.PriceRoute.SrcToken,
+		SrcDecimals:  18,
+		DestToken:    prices.PriceRoute.DestToken,
+		DestDecimals: 18,
+		SrcAmount:    prices.PriceRoute.SrcAmount,
+		DestAmount:   prices.PriceRoute.DestAmount,
+		PriceRoute:   innerPriceRoute,
+		TxOrigin:     userAddress.String(),
+		UserAddress:  arbitrageContractAddressStr,
+	}
+
+	transactionsBodyJSON, err := json.Marshal(transactionsBody)
+	if err != nil {
+		return nil, errors.Join(errors.New("failed to marshal transaction body"), err)
+	}
+
+	reqTransaction, err := http.NewRequest("POST", urlTransaction, bytes.NewBuffer(transactionsBodyJSON))
+	if err != nil {
+		return nil, errors.Join(errors.New("failed to create request"), err)
+	}
+
+	reqTransaction.Header.Add("Content-Type", "application/json")
+	reqTransaction.Header.Add("Accept", "application/json")
+
+	respTransaction, err := client.Do(reqTransaction)
+	if err != nil {
+		return nil, errors.Join(errors.New("failed to send request"), err)
+	}
+
+	bodyTransaction, err := io.ReadAll(respTransaction.Body)
+	if err != nil {
+		return nil, errors.Join(errors.New("failed to read response body"), err)
+	}
+
+	err = json.Unmarshal(bodyTransaction, &errResp)
+	if err != nil {
+		return nil, errors.Join(errors.New("failed to unmarshal error response body"), err)
+	}
+
+	if errResp.Error != "" {
+		return nil, fmt.Errorf("paraswap API error: %s", errResp.Error)
+	}
+
+	var transactionsResponse ParaswapTransactionsResponse
+	err = json.Unmarshal(bodyTransaction, &transactionsResponse)
+	if err != nil {
+		return nil, errors.Join(errors.New("failed to unmarshal response body"), err)
+	}
+
+	logger.Debug("fetched paraswap transaction data")
+
+	if !strings.EqualFold(ParaswapV6_2AddressStr, transactionsResponse.To) {
+		return nil, fmt.Errorf("invalid paraswap router address: %s, expected: %s", transactionsResponse.To, ParaswapV6_2AddressStr)
+	}
+
+	if !strings.EqualFold(arbitrageContractAddressStr, transactionsResponse.From) {
+		return nil, fmt.Errorf("invalid paraswap from address: %s, expected: %s (arbitrage contract)", transactionsResponse.From, arbitrageContractAddressStr)
+	}
+
+	if transactionsResponse.Value != "0" {
+		return nil, fmt.Errorf("invalid paraswap value: %s, expected: 0", transactionsResponse.Value)
+	}
+
+	swapInAmount, _ := new(big.Int).SetString(prices.PriceRoute.SrcAmount, 10)
+	swapOutAmount, _ := new(big.Int).SetString(prices.PriceRoute.DestAmount, 10)
+	dataParaswap := &ParaswapArbitrage{
+		swapInAmountWeth:  swapInAmount,
+		swapOutAmountReth: swapOutAmount,
+		calldata:          common.FromHex(transactionsResponse.Data),
+	}
+
+	return dataParaswap, nil
 }
