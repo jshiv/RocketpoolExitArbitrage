@@ -192,6 +192,7 @@ func estimateProfit(ctx context.Context, logger *slog.Logger, client *ethclient.
 		addresses,
 		rethInstance,
 		false,
+		arbitrage.BestProtocol,
 	)
 	if err != nil {
 		return nil, nil, errors.Join(errors.New("failed to calculate arbitrage data"), err)

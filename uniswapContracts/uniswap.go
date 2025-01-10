@@ -24,12 +24,18 @@ const (
 	PoolB = "0xa4e0faA58465A2D369aa21B3e42d43374c6F9613" // 0.05% fee
 )
 
-func GetBestPoolWithdrawArb(ctx context.Context, logger *slog.Logger, client *ethclient.Client, amount *big.Int) (common.Address, *big.Int, error) {
+var (
+	ErrPriceLimitExceeded = errors.New("price limit exceeded")
+
+	UniswapQ96 = new(big.Float).SetInt(new(big.Int).Lsh(big.NewInt(1), 96))
+)
+
+func GetBestPoolWithdrawArb(ctx context.Context, logger *slog.Logger, client *ethclient.Client, amount *big.Int, primaryRatio *big.Float) (common.Address, *big.Int, error) {
 	// withdraw swaps => zeroForOne = false
-	return GetBestPool(ctx, logger, client, false, amount)
+	return GetBestPool(ctx, logger, client, false, amount, primaryRatio)
 }
 
-func GetBestPool(ctx context.Context, logger *slog.Logger, client *ethclient.Client, zeroForOne bool, amount *big.Int) (common.Address, *big.Int, error) {
+func GetBestPool(ctx context.Context, logger *slog.Logger, client *ethclient.Client, zeroForOne bool, amount *big.Int, primaryRatio *big.Float) (common.Address, *big.Int, error) {
 	// afaik there is no good uniswap deployment on holesky
 	networkID, err := client.NetworkID(ctx)
 	if err != nil {
@@ -39,7 +45,16 @@ func GetBestPool(ctx context.Context, logger *slog.Logger, client *ethclient.Cli
 		return common.Address{}, nil, errors.New("only mainnet is supported for uniswap arbitrage")
 	}
 
-	poolAAmountIn, err := getExactOutput(ctx, client, zeroForOne, amount, big.NewInt(100))
+	var limit *big.Int
+	if primaryRatio != nil {
+		sqrt := new(big.Float).Sqrt(primaryRatio)        // calculate sqrt
+		resFloat := new(big.Float).Mul(sqrt, UniswapQ96) // multiply by 2^96
+		limit, _ = resFloat.Int(nil)
+	} else {
+		limit = big.NewInt(0)
+	}
+
+	poolAAmountIn, err := getExactOutput(ctx, client, zeroForOne, amount, big.NewInt(100), limit)
 	if err != nil {
 		return common.Address{}, nil, errors.Join(errors.New("failed to get pool A"), err)
 	}
@@ -49,12 +64,12 @@ func GetBestPool(ctx context.Context, logger *slog.Logger, client *ethclient.Cli
 		logger.Debug("0.01 percent pool", slog.String("address", PoolB), slog.Float64("Amount In", poolAAmountFloat))
 	}
 
-	poolBAmountIn, err := getExactOutput(ctx, client, zeroForOne, amount, big.NewInt(500))
+	poolBAmountIn, err := getExactOutput(ctx, client, zeroForOne, amount, big.NewInt(500), limit)
 	if err != nil {
 		// the pool B has a rather low liquidity - 200k USD per side as of 10.01.2025
 		// if we get an error this is probably cause by the low liquidity
 		// therefor we only log it as a warning and default back to pool A
-		logger.Warn("failed to get uniswap estimation - possible too low liquidty", slog.String("pool", PoolB))
+		logger.Debug("failed to get uniswap estimation - possible too low liquidty", slog.String("pool", PoolB))
 		return common.HexToAddress(PoolA), poolAAmountIn, nil
 	}
 
@@ -71,7 +86,7 @@ func GetBestPool(ctx context.Context, logger *slog.Logger, client *ethclient.Cli
 	}
 }
 
-func getExactOutput(ctx context.Context, client *ethclient.Client, zeroForOne bool, amount, fee *big.Int) (*big.Int, error) {
+func getExactOutput(ctx context.Context, client *ethclient.Client, zeroForOne bool, amount, fee, limit *big.Int) (*big.Int, error) {
 	quoterABI, err := abi.JSON(strings.NewReader(helper.HelperABI))
 	if err != nil {
 		return nil, errors.Join(errors.New("failed to get Quoter ABI"), err)
@@ -125,10 +140,14 @@ func getExactOutput(ctx context.Context, client *ethclient.Client, zeroForOne bo
 		return nil, fmt.Errorf("failed to unpack output: %v", err)
 	}
 
+	if result.SqrtPriceX96After.Cmp(limit) > 0 {
+		return nil, ErrPriceLimitExceeded
+	}
+
 	return result.AmountIn, nil
 }
 
-func getExactInput(ctx context.Context, client *ethclient.Client, zeroForOne bool, amount, fee *big.Int) (*big.Int, error) {
+func getExactInput(ctx context.Context, client *ethclient.Client, zeroForOne bool, amount, fee, limit *big.Int) (*big.Int, error) {
 	quoterABI, err := abi.JSON(strings.NewReader(helper.HelperABI))
 	if err != nil {
 		return nil, errors.Join(errors.New("failed to get Quoter ABI"), err)
@@ -180,6 +199,10 @@ func getExactInput(ctx context.Context, client *ethclient.Client, zeroForOne boo
 	err = quoterABI.UnpackIntoInterface(&result, "quoteExactInputSingle", output)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unpack output: %v", err)
+	}
+
+	if result.SqrtPriceX96After.Cmp(limit) > 0 {
+		return nil, ErrPriceLimitExceeded
 	}
 
 	return result.AmountOut, nil
