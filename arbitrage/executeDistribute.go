@@ -76,6 +76,7 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 	var bundle *flashbots_client.Bundle
 	var rethToBurn, rETHShare, expectedProfit *big.Int
 	if dataIn.LocalReth {
+		return errors.New("not yet tested. Feel free to modify and execute on your own risk.")
 		bundle, rethToBurn, rETHShare, err = BuildCallLocalReth(ctx, logger, *dataIn)
 		if err != nil {
 			return errors.Join(errors.New("failed to build call"), err)
