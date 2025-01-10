@@ -48,6 +48,7 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 		isWithdrawalAddress = true
 	}
 
+	// update user on receiver address
 	if logger.Enabled(ctx, slog.LevelInfo) {
 		fmt.Print("Any profit will be sent to ")
 		fmt.Print(colorOrange, (*dataIn.ReceiverAddress).Hex(), colorReset)
@@ -58,6 +59,7 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 		}
 	}
 
+	// if using a random private key, update the fee refund recipient to the receiver address
 	if dataIn.RandomPrivateKey {
 		err = dataIn.FbClient.UpdateFeeRefundRecipient(*dataIn.ReceiverAddress)
 		if err != nil {
@@ -91,6 +93,7 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 		return errors.Join(errors.New("failed to simulate bundle"), err)
 	}
 
+	// udpate success based on tx results
 	for index, tx := range res.Results {
 		if tx.Error != "" {
 			logger.Warn("tx failed", slog.Int("index", index), slog.String("error", tx.Error), slog.String("revertReason", hex.EncodeToString([]byte(tx.RevertReason))))
@@ -130,6 +133,7 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 		}
 	}
 
+	// print dry run and return if requested
 	if dataIn.DryRun {
 		txs := bundle.Transactions()
 		fmt.Println("Dry run. Would have sent the following bundle:")
@@ -166,6 +170,7 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 		return errors.New("expected profit is less than max arbitrage fees")
 	}
 
+	// ask for user confirmation
 	if !dataIn.SkipConfirmation && !waitForUserConfirmation() {
 		return errors.New("user did not confirm to proceed")
 	}
@@ -252,7 +257,7 @@ func getWithdrawalAddress(ctx context.Context, client *ethclient.Client, nodeAdd
 		Pending: false,
 		Context: timoutCtx,
 	}
-	
+
 	address, err := storageInterface.GetNodeWithdrawalAddress(opts, nodeAddress)
 	if err != nil {
 		return common.Address{}, errors.Join(errors.New("failed to get node withdrawal address"), err)

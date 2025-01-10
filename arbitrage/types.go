@@ -89,18 +89,18 @@ type OneInchErrorResponse struct {
 }
 
 type ParaswapTransactionsBody struct {
-	SrcToken     string      `json:"srcToken"`
-	SrcDecimals  int         `json:"srcDecimals"`
-	DestToken    string      `json:"destToken"`
-	DestDecimals int         `json:"destDecimals"`
-	SrcAmount    string      `json:"srcAmount"`
-	DestAmount   string      `json:"destAmount"`
+	SrcToken     string          `json:"srcToken"`
+	SrcDecimals  int             `json:"srcDecimals"`
+	DestToken    string          `json:"destToken"`
+	DestDecimals int             `json:"destDecimals"`
+	SrcAmount    string          `json:"srcAmount"`
+	DestAmount   string          `json:"destAmount"`
 	PriceRoute   json.RawMessage `json:"priceRoute"`
-	TxOrigin     string      `json:"txOrigin"`
-	UserAddress  string      `json:"userAddress"`
+	TxOrigin     string          `json:"txOrigin"`
+	UserAddress  string          `json:"userAddress"`
 }
 
-type ParaswapPriceRoute struct {	
+type ParaswapPriceRoute struct {
 	BlockNumber  int64  `json:"blockNumber"`
 	Network      int    `json:"network"`
 	SrcToken     string `json:"srcToken"`
