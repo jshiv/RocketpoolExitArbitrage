@@ -40,6 +40,73 @@ const (
 	ParaswapV6_2AddressStr      = "0x6a000f20005980200259b80c5102003040001068"
 )
 
+func BuildCallLocalReth(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashbots_client.Bundle, *big.Int, *big.Int, error) {
+	logger.With(slog.String("function", "BuildCallLocalReth"))
+
+	baseGas, tipGas, err := getCurrentGasSettings(ctx, dataIn.Client)
+	if err != nil {
+		return nil, nil, nil, errors.Join(errors.New("failed to get current gas settings"), err)
+	}
+
+	baseGasBoosted := new(big.Int).Div(new(big.Int).Mul(baseGas, big.NewInt(150)), big.NewInt(100))
+
+	if logger.Enabled(ctx, slog.LevelInfo) {
+		baseGasFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(baseGas), new(big.Float).SetInt(big.NewInt(1e9))).Float64()
+		tipGasFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(tipGas), new(big.Float).SetInt(big.NewInt(1e9))).Float64()
+		baseGasBoostedFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(baseGasBoosted), new(big.Float).SetInt(big.NewInt(1e9))).Float64()
+
+		fmt.Printf("Current gas settings: base fee per gas is %.2f gwei, tip is %.2f gwei.\n", baseGasFloat, tipGasFloat)
+		fmt.Printf("Sending transaction with a base fee per gas of %.2f gwei for timely inclusion.\n\n", baseGasBoostedFloat)
+	}
+
+	nonce, err := getCurrentNonce(ctx, dataIn.Client, *dataIn.NodeAddress)
+	if err != nil {
+		return nil, nil, nil, errors.Join(errors.New("failed to get current nonce"), err)
+	}
+
+	txs, err := generateAndBuildDistributeCalls(nonce, dataIn.MinipoolAddresses, baseGasBoosted, tipGas, logger, dataIn.Command)
+	if err != nil {
+		return nil, nil, nil, errors.Join(errors.New("failed to generate distribute calls"), err)
+	}
+
+	rETHShare, err := calcaulteDistributedBalance(ctx, logger, dataIn)
+	if err != nil {
+		return nil, nil, nil, errors.Join(errors.New("failed to calculate distributed balance"), err)
+	}
+
+	if dataIn.DryRun {
+		fmt.Println(string(colorRed), "If you want to use tenderly to simulate the arbitrage, you need to overwrite the state for the final transaction:")
+		fmt.Printf("    - Set the ETH balance of the rETH contract (%s) to %s\n", rEthContractAddressStr, rETHShare.String())
+		fmt.Println(string(colorReset))
+	}
+
+	// calcaulte amount rETH to burn
+	rethToBurn, err := ConvertWethToReth(ctx, dataIn.RETHInstance, rETHShare)
+	if err != nil {
+		return nil, nil, nil, errors.Join(errors.New("failed to convert rETH to WETH"), err)
+	}
+
+	logger.Debug("calculated rETH to burn", slog.String("rethToBurn", rethToBurn.String()))
+
+	nextNonce := nonce + uint64(len(txs))
+	rawBurnTx, err := generateBurnCall(nextNonce, rethToBurn, baseGasBoosted, tipGas)
+	if err != nil {
+		return nil, nil, nil, errors.Join(errors.New("failed to generate burn call"), err)
+	}
+
+	signedBurnTx, err := signTransaction(logger, dataIn.Command, rawBurnTx)
+	if err != nil {
+		return nil, nil, nil, errors.Join(errors.New("failed to sign burn tx"), err)
+	}
+
+	logger.Debug("signed burn tx", slog.String("txHash", signedBurnTx.Hash().Hex()))
+	txs = append(txs, signedBurnTx)
+
+	bundle := flashbots_client.NewBundleWithTransactions(txs)
+
+	return bundle, rethToBurn, rETHShare, nil
+}
+
 func BuildCall(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashbots_client.Bundle, *big.Int, error) {
 	logger.With(slog.String("function", "BuildCall"))
 
@@ -69,12 +136,13 @@ func BuildCall(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashb
 		return nil, nil, errors.Join(errors.New("failed to generate distribute calls"), err)
 	}
 
-	rethToBurn, uniswapData, paraswapData, err := calcualteArbitrageData(ctx, logger, dataIn)
+	uniswapData, paraswapData, err := calcualteArbitrageData(ctx, logger, dataIn)
 	if err != nil {
 		return nil, nil, errors.Join(errors.New("failed to calculate arbitrage data"), err)
 	}
 
 	disributeFee := len(dataIn.MinipoolAddresses) * DISTRIBUTE_CALL_MAX_GAS
+
 	uniswapData.expectedFee = disributeFee + ARBITRAGE_UNISWAP_CALL_MAX_GAS
 	uniswapData.expectedProfitAfterFees = new(big.Int).Sub(uniswapData.expectedProfit, big.NewInt(int64(uniswapData.expectedFee)))
 	paraswapData.expectedFee = disributeFee + ARBITRAGE_PARASWAP_CALL_MAX_GAS
@@ -89,7 +157,7 @@ func BuildCall(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashb
 			profitFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(uniswapData.expectedProfitAfterFees), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
 			secondaryRatio := amountWethFloat / amountRethFloat
 			// update user about the secondary ratio
-			fmt.Printf("Uniswap: Swapping %.6f WETH to %.6f rETH at a secondary ratio of %.5f with a minimum profit of %.6f. (pool %s)\n",
+			fmt.Printf("Uniswap: Swapping %.6f WETH to %.6f rETH at a secondary ratio of %.5f with an expected profit of %.6f. (pool %s)\n",
 				amountWethFloat,
 				amountRethFloat,
 				secondaryRatio,
@@ -103,7 +171,7 @@ func BuildCall(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashb
 			profitFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(paraswapData.expectedProfitAfterFees), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
 			secondaryRatio := amountWethFloat / amountRethFloat
 			// update user about the secondary ratio
-			fmt.Printf("Paraswap: Swapping %.6f WETH to %.6f rETH at a secondary ratio of %.5f with a minimum profit of %.6f.\n",
+			fmt.Printf("Paraswap: Swapping %.6f WETH to %.6f rETH at a secondary ratio of %.5f with an expected profit of %.6f.\n",
 				amountWethFloat,
 				amountRethFloat,
 				secondaryRatio,
@@ -120,28 +188,19 @@ func BuildCall(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashb
 		fmt.Println() // newline
 	}
 
-	expectedProfit := big.NewInt(0)
-	count := len(txs)
-	logger.Debug("signed distribute txs", slog.Int("count", count))
-	if dataIn.LocalReth {
-		rawBurnTx, err := generateBurnCall(nonce+uint64(count), rethToBurn, baseGasBoosted, tipGas)
-		if err != nil {
-			return nil, nil, errors.Join(errors.New("failed to generate burn call"), err)
-		}
-
-		signedBurnTx, err := signTransaction(logger, dataIn.Command, rawBurnTx)
-		if err != nil {
-			return nil, nil, errors.Join(errors.New("failed to sign burn tx"), err)
-		}
-
-		logger.Debug("signed burn tx", slog.String("txHash", signedBurnTx.Hash().Hex()))
-		txs = append(txs, signedBurnTx)
-	} else if dataIn.Protocol == UniswapProtocol || (dataIn.Protocol == BestProtocol && uniswapIsBetter) {
+	var expectedProfit *big.Int
+	nextNonce := nonce + uint64(len(txs))
+	logger.Debug("signed distribute txs", slog.Int("count", len(txs)))
+	if dataIn.Protocol == UniswapProtocol || (dataIn.Protocol == BestProtocol && uniswapIsBetter) {
 		expectedProfit = new(big.Int).Sub(uniswapData.expectedProfit, big.NewInt(int64(uniswapData.expectedFee)))
 
 		var minProfit *big.Int
 		if dataIn.CheckProfit {
-			minProfit = big.NewInt(int64(uniswapData.expectedFee))
+			// add 75% of the profit to the min profit
+			minProfit = new(big.Int).Add(
+				big.NewInt(int64(uniswapData.expectedFee)),
+				new(big.Int).Div(new(big.Int).Mul(uniswapData.expectedProfit, big.NewInt(75)), big.NewInt(100)),
+			)
 		} else {
 			if logger.Enabled(ctx, slog.LevelInfo) {
 				fmt.Println("Ignoring distribute cost, will distribute regardless of profit.")
@@ -154,7 +213,7 @@ func BuildCall(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashb
 			logger.Debug("calculated min profit", slog.Float64("minProfit", minProfitFloat))
 		}
 
-		rawArbitrageTx, err := generateArbitrageCall(nonce+uint64(count), uniswapData, minProfit, baseGasBoosted, tipGas, *dataIn.ReceiverAddress)
+		rawArbitrageTx, err := generateArbitrageCall(nextNonce, uniswapData, minProfit, baseGasBoosted, tipGas, *dataIn.ReceiverAddress)
 		if err != nil {
 			return nil, nil, errors.Join(errors.New("failed to generate arbitrage call"), err)
 		}
@@ -171,7 +230,11 @@ func BuildCall(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashb
 
 		var minProfit *big.Int
 		if dataIn.CheckProfit {
-			minProfit = big.NewInt(int64(paraswapData.expectedFee))
+			// add 75% of the profit to the min profit
+			minProfit = new(big.Int).Add(
+				big.NewInt(int64(paraswapData.expectedFee)),
+				new(big.Int).Div(new(big.Int).Mul(paraswapData.expectedProfit, big.NewInt(75)), big.NewInt(100)),
+			)
 		} else {
 			if logger.Enabled(ctx, slog.LevelInfo) {
 				fmt.Println("Ignoring distribute cost, will distribute regardless of profit.")
@@ -184,7 +247,7 @@ func BuildCall(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashb
 			logger.Debug("calculated min profit", slog.Float64("minProfit", minProfitFloat))
 		}
 
-		rawArbitrageTx, err := generateParaswapArbitrageCall(nonce+uint64(count), paraswapData, minProfit, baseGasBoosted, tipGas, *dataIn.ReceiverAddress)
+		rawArbitrageTx, err := generateParaswapArbitrageCall(nextNonce, paraswapData, minProfit, baseGasBoosted, tipGas, *dataIn.ReceiverAddress)
 		if err != nil {
 			return nil, nil, errors.Join(errors.New("failed to generate paraswap call"), err)
 		}
@@ -257,10 +320,10 @@ func calcaulteDistributedBalance(ctx context.Context, logger *slog.Logger, dataI
 	return totalDistributeAmount, nil
 }
 
-func calcualteArbitrageData(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*big.Int, *UniswapArbitrage, *ParaswapArbitrage, error) {
+func calcualteArbitrageData(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*UniswapArbitrage, *ParaswapArbitrage, error) {
 	rETHShare, err := calcaulteDistributedBalance(ctx, logger, dataIn)
 	if err != nil {
-		return nil, nil, nil, errors.Join(errors.New("failed to calculate distributed balance"), err)
+		return nil, nil, errors.Join(errors.New("failed to calculate distributed balance"), err)
 	}
 
 	if dataIn.DryRun {
@@ -272,7 +335,7 @@ func calcualteArbitrageData(ctx context.Context, logger *slog.Logger, dataIn Dat
 	// calcaulte amount rETH to burn
 	rethToBurn, err := ConvertWethToReth(ctx, dataIn.RETHInstance, rETHShare)
 	if err != nil {
-		return nil, nil, nil, errors.Join(errors.New("failed to convert rETH to WETH"), err)
+		return nil, nil, errors.Join(errors.New("failed to convert rETH to WETH"), err)
 	}
 
 	logger.Debug("calculated rETH to burn", slog.String("rethToBurn", rethToBurn.String()))
@@ -280,9 +343,8 @@ func calcualteArbitrageData(ctx context.Context, logger *slog.Logger, dataIn Dat
 	// get best pool to swap rETH
 	poolAddress, uniswapReturnAmountWeth, err := uniswap.GetBestPoolWithdrawArb(ctx, logger, dataIn.Client, rethToBurn)
 	if err != nil {
-		return nil, nil, nil, errors.Join(errors.New("failed to get best pool"), err)
+		return nil, nil, errors.Join(errors.New("failed to get best pool"), err)
 	}
-
 
 	// early exit if we use the users rETH
 	if dataIn.LocalReth {
@@ -290,7 +352,7 @@ func calcualteArbitrageData(ctx context.Context, logger *slog.Logger, dataIn Dat
 			poolAmountInFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(uniswapReturnAmountWeth), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
 			poolAmountOutFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(rethToBurn), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
 			secondaryRatio := poolAmountInFloat / poolAmountOutFloat
-		
+
 			rethToBurnFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(rethToBurn), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
 			ethUnlockedFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(rETHShare), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
 			primaryRatio := ethUnlockedFloat / rethToBurnFloat
@@ -298,10 +360,10 @@ func calcualteArbitrageData(ctx context.Context, logger *slog.Logger, dataIn Dat
 			fmt.Printf("At the secondary ratio of %f, you would swap %.6f rETH to %.6f WETH\n\n", secondaryRatio, poolAmountOutFloat, poolAmountInFloat)
 			fmt.Printf("At the primary ratio of %f, you will burn %.6f rETH for %.6f ETH\n\n", primaryRatio, rethToBurnFloat, ethUnlockedFloat)
 		}
-		return rethToBurn, nil, nil, nil
+		return nil, nil, nil
 	}
 
-	if logger.Enabled(ctx, slog.LevelInfo) {		
+	if logger.Enabled(ctx, slog.LevelInfo) {
 		rethToBurnFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(rethToBurn), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
 		ethUnlockedFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(rETHShare), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
 		primaryRatio := ethUnlockedFloat / rethToBurnFloat
@@ -315,7 +377,7 @@ func calcualteArbitrageData(ctx context.Context, logger *slog.Logger, dataIn Dat
 	}
 
 	uniswapReturnAmountWeth = new(big.Int).Sub(uniswapReturnAmountWeth, big.NewInt(5))
-	dataUniswap := UniswapArbitrage{
+	dataUniswap := &UniswapArbitrage{
 		poolAddress:       poolAddress,
 		swapInAmountWeth:  uniswapReturnAmountWeth,
 		swapOutAmountReth: rethToBurn,
@@ -325,12 +387,12 @@ func calcualteArbitrageData(ctx context.Context, logger *slog.Logger, dataIn Dat
 	// fetch paraswap data
 	dataParaswap, err := fetchParaswapData(ctx, logger, rethToBurn, dataIn.NodeAddress)
 	if err != nil {
-		return nil, nil, nil, errors.Join(errors.New("failed to fetch paraswap data"), err)
+		return nil, nil, errors.Join(errors.New("failed to fetch paraswap data"), err)
 	}
 
 	dataParaswap.expectedProfit = new(big.Int).Sub(rETHShare, dataParaswap.swapInAmountWeth)
 
-	return rethToBurn, &dataUniswap, dataParaswap, nil
+	return dataUniswap, dataParaswap, nil
 }
 
 func getCurrentGasSettings(ctx context.Context, client *ethclient.Client) (baseGas *big.Int, tipGas *big.Int, err error) {

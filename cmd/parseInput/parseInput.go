@@ -177,6 +177,11 @@ func Input(ctx context.Context, logger *slog.Logger) (data *arbitrage.DataIn, er
 		logger.Debug("receiverAddress", slog.String("receiverAddress", receiverAddress.Hex()))
 	}
 
+	// overwrite this as local reth does not generate profit
+	if data.LocalReth {
+		data.CheckProfit = false
+	}
+
 	logger.Debug("localReth", slog.Bool("localReth", data.LocalReth))
 	logger.Debug("dryRunFlag", slog.Bool("dryRunFlag", data.DryRun))
 	logger.Debug("skipConfirmation", slog.Bool("skipConfirmation", data.SkipConfirmation))

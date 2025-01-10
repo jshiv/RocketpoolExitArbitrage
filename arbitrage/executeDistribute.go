@@ -70,9 +70,19 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 		}
 	}
 
-	bundle, expectedProfit, err := BuildCall(ctx, logger, *dataIn)
-	if err != nil {
-		return errors.Join(errors.New("failed to build call"), err)
+	// build bundle
+	var bundle *flashbots_client.Bundle
+	var rethToBurn, rETHShare, expectedProfit *big.Int
+	if dataIn.LocalReth {
+		bundle, rethToBurn, rETHShare, err = BuildCallLocalReth(ctx, logger, *dataIn)
+		if err != nil {
+			return errors.Join(errors.New("failed to build call"), err)
+		}
+	} else {
+		bundle, expectedProfit, err = BuildCall(ctx, logger, *dataIn)
+		if err != nil {
+			return errors.Join(errors.New("failed to build call"), err)
+		}
 	}
 
 	logger.Debug("created flashbots client")
@@ -90,18 +100,35 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 
 	maxBundleFees, maxArbitrageFees := evalGasPrices(bundle)
 
-	maxBundleFeesFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(maxBundleFees), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
-	maxArbitrageFeesFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(maxArbitrageFees), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
-	expectedProfitFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(expectedProfit), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
-	fmt.Print("Simulated bundle (")
-	if success {
-		fmt.Print(string(colorGreen), "success", string(colorReset))
-	} else {
-		fmt.Print(string(colorRed), "failed", string(colorReset))
+	// print update based on user selection
+	if logger.Enabled(ctx, slog.LevelInfo) {
+		if dataIn.LocalReth {
+			rEthBurnedFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(rethToBurn), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
+			ethReceivedFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(rETHShare), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
+			expectedFeeFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(maxBundleFees), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
+			fmt.Print("Simulated bundle (")
+			if success {
+				fmt.Print(string(colorGreen), "success", string(colorReset))
+			} else {
+				fmt.Print(string(colorRed), "failed", string(colorReset))
+			}
+			fmt.Println("):")
+			fmt.Printf("    Expected to burn %.6f rETH for %.6f ETH, with a tx fee of %.6f\n", rEthBurnedFloat, ethReceivedFloat, expectedFeeFloat)
+		} else {
+			maxBundleFeesFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(maxBundleFees), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
+			maxArbitrageFeesFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(maxArbitrageFees), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
+			expectedProfitFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(expectedProfit), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
+			fmt.Print("Simulated bundle (")
+			if success {
+				fmt.Print(string(colorGreen), "success", string(colorReset))
+			} else {
+				fmt.Print(string(colorRed), "failed", string(colorReset))
+			}
+			fmt.Println("):")
+			fmt.Printf("    Expected profit after fees: %.6f, with a tx fee of %.6f\n", expectedProfitFloat-maxBundleFeesFloat, maxBundleFeesFloat)
+			fmt.Printf("    Expected profit after arbitrage fees: %.6f, with a tx fee of %.6f (interesting if you want to distribute regardless)\n\n", expectedProfitFloat-maxArbitrageFeesFloat, maxArbitrageFeesFloat)
+		}
 	}
-	fmt.Println("):")
-	fmt.Printf("    Expected profit after fees: %.6f, with a tx fee of %.6f\n", expectedProfitFloat-maxBundleFeesFloat, maxBundleFeesFloat)
-	fmt.Printf("    Expected profit after arbitrage fees: %.6f, with a tx fee of %.6f (interesting if you want to distribute regardless)\n\n", expectedProfitFloat-maxArbitrageFeesFloat, maxArbitrageFeesFloat)
 
 	if dataIn.DryRun {
 		txs := bundle.Transactions()
