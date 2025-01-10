@@ -211,4 +211,3 @@ func parseInput(ctx context.Context, logger *slog.Logger) (data *arbitrage.DataI
 
 	return data, nil
 }
-

@@ -21,7 +21,6 @@ const (
 	rETHAddressStr = "0xae78736Cd615f374D3085123A210448E74Fc6393"
 )
 
-
 func main() {
 	nodeAddress, eth1Url, eth2Url, err := parseInput()
 	if err != nil {
@@ -51,7 +50,7 @@ func main() {
 		return
 	}
 
-	feePaidSingle := new(big.Int).Mul(gasPrice, big.NewInt(int64(arbitrage.DISTRIBUTE_CALL_MAX_GAS + arbitrage.ARBITRAGE_PARASWAP_CALL_MAX_GAS)))
+	feePaidSingle := new(big.Int).Mul(gasPrice, big.NewInt(int64(arbitrage.DISTRIBUTE_CALL_MAX_GAS+arbitrage.ARBITRAGE_PARASWAP_CALL_MAX_GAS)))
 	feePaidSingleFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(feePaidSingle), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
 
 	fmt.Println("Example profits:")
@@ -84,7 +83,7 @@ func main() {
 	fmt.Printf("If you distribute a minipool with 0.1 ETH, the expected profit is %.6f ETH with a fee of %.6f\n\n", distributeB, feePaidSingleFloat)
 
 	count := 0
-	withdrawnBalance := big.NewInt(0)	
+	withdrawnBalance := big.NewInt(0)
 	for _, minipool := range data.Minipools {
 		balance, err := client.BalanceAt(ctx, minipool.WithdrawalAddress, nil)
 		if err != nil {
@@ -98,9 +97,8 @@ func main() {
 		}
 	}
 
-	gasUsed := count * arbitrage.DISTRIBUTE_CALL_MAX_GAS + arbitrage.ARBITRAGE_PARASWAP_CALL_MAX_GAS
+	gasUsed := count*arbitrage.DISTRIBUTE_CALL_MAX_GAS + arbitrage.ARBITRAGE_PARASWAP_CALL_MAX_GAS
 	feePaid := new(big.Int).Mul(gasPrice, big.NewInt(int64(gasUsed)))
-
 
 	rethShare, allMinipoolsProfit, err := estimateProfit(ctx, logger, client, nodeAddress, data)
 	if err != nil {
@@ -113,7 +111,7 @@ func main() {
 	allMinipoolsProfitFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(allMinipoolsProfit), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
 	feePaidFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(feePaid), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
 	fmt.Printf("You currently have %.4f ETH withdrawn.\nIf you distribute that, %.6f ETH will be send to rETH and the expected profit is %.6f ETH with a fee of %.6f\n",
-	withdrawnBalanceFloat,
+		withdrawnBalanceFloat,
 		rethShareFloat,
 		allMinipoolsProfitFloat,
 		feePaidFloat,
@@ -194,7 +192,7 @@ func estimateProfit(ctx context.Context, logger *slog.Logger, client *ethclient.
 		addresses,
 		rethInstance,
 		false,
-	)	
+	)
 	if err != nil {
 		return nil, nil, errors.Join(errors.New("failed to calculate arbitrage data"), err)
 	}
@@ -222,13 +220,13 @@ func getExampleProfits(ctx context.Context, logger *slog.Logger, client *ethclie
 	}
 
 	// get best pool to swap rETH
-	_, uniswapReturnAmountWeth, err := uniswap.GetBestPoolWithdrawArb(ctx, logger, client, rethToBurn)
+	_, uniswapReturnAmountWeth, err := uniswap.GetBestPoolWithdrawArb(ctx, logger, client, rethToBurn, nil)
 	if err != nil {
 		return 0, errors.Join(errors.New("failed to get best pool"), err)
 	}
 
 	profit := new(big.Int).Sub(rETHShare, uniswapReturnAmountWeth)
 	profitFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(profit), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
-	
+
 	return profitFloat, nil
 }

@@ -18,8 +18,8 @@ type Minipool struct {
 	ExitEpoch             uint64
 	WithdrawableEpoch     uint64
 	ActivationEpoch       uint64
-	WithdrawalAddress    common.Address
-	Balance *big.Int
+	WithdrawalAddress     common.Address
+	Balance               *big.Int
 }
 
 type Data struct {

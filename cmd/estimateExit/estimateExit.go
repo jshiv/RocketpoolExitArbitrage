@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	EntryChurnLimit = 8
-	ExitChurnLimit = 16
+	EntryChurnLimit      = 8
+	ExitChurnLimit       = 16
 	EpochsAfterExitStart = 256
 )
 
@@ -32,7 +32,7 @@ func main() {
 
 	estimateTimeToExit(data)
 
-	printTimeToExit(data)	
+	printTimeToExit(data)
 }
 
 func estimateTimeToExit(data *beaconchain.Data) {
@@ -59,7 +59,7 @@ func estimateTimeToExit(data *beaconchain.Data) {
 			}
 
 			minipool.TimeToExitStart = time.Duration(epochsBeforeExitStart) * 32 * 12 * time.Second // 32 slots per epoch @ 12s per slot
-			minipool.TimeToExit = time.Duration(epochsToGo) * 32 * 12 * time.Second // 32 slots per epoch @ 12s per slot
+			minipool.TimeToExit = time.Duration(epochsToGo) * 32 * 12 * time.Second                 // 32 slots per epoch @ 12s per slot
 
 			// estimate time to withdraw
 			var slotsToNextWithdraw int
@@ -68,15 +68,15 @@ func estimateTimeToExit(data *beaconchain.Data) {
 			} else {
 				slotsToNextWithdraw = data.ValidatorsCount - minipool.Index
 			}
-			minipool.TimeToWithdrawEst = time.Duration(slotsToNextWithdraw / data.WithdrawalPerSlot) * 12 * time.Second
-			timeForOneSweep := time.Duration(data.ValidatorsCount / data.WithdrawalPerSlot) * 12 * time.Second
+			minipool.TimeToWithdrawEst = time.Duration(slotsToNextWithdraw/data.WithdrawalPerSlot) * 12 * time.Second
+			timeForOneSweep := time.Duration(data.ValidatorsCount/data.WithdrawalPerSlot) * 12 * time.Second
 			for minipool.TimeToWithdrawEst < minipool.TimeToExit {
 				minipool.TimeToWithdrawEst += timeForOneSweep
 			}
 		case "active_ongoing":
 			// 1st check if old enough:
 			epochsBeforeExitStart := uint64(0)
-			if data.CurrentEpoch - 256 < minipool.ActivationEpoch {
+			if data.CurrentEpoch-256 < minipool.ActivationEpoch {
 				epochsBeforeExitStart = 256 - (data.CurrentEpoch - minipool.ActivationEpoch)
 			}
 
@@ -92,7 +92,7 @@ func estimateTimeToExit(data *beaconchain.Data) {
 			}
 
 			minipool.TimeToExitStart = time.Duration(epochsBeforeExitStart) * 32 * 12 * time.Second // 32 slots per epoch @ 12s per slot
-			minipool.TimeToExit = time.Duration(epochsToGo) * 32 * 12 * time.Second // 32 slots per epoch @ 12s per slot
+			minipool.TimeToExit = time.Duration(epochsToGo) * 32 * 12 * time.Second                 // 32 slots per epoch @ 12s per slot
 
 			// estimate time to withdraw
 			var slotsToNextWithdraw int
@@ -101,8 +101,8 @@ func estimateTimeToExit(data *beaconchain.Data) {
 			} else {
 				slotsToNextWithdraw = data.ValidatorsCount - minipool.Index
 			}
-			minipool.TimeToWithdrawEst = time.Duration(slotsToNextWithdraw / data.WithdrawalPerSlot) * 12 * time.Second
-			timeForOneSweep := time.Duration(data.ValidatorsCount / data.WithdrawalPerSlot) * 12 * time.Second
+			minipool.TimeToWithdrawEst = time.Duration(slotsToNextWithdraw/data.WithdrawalPerSlot) * 12 * time.Second
+			timeForOneSweep := time.Duration(data.ValidatorsCount/data.WithdrawalPerSlot) * 12 * time.Second
 			for minipool.TimeToWithdrawEst < minipool.TimeToExit {
 				minipool.TimeToWithdrawEst += timeForOneSweep
 			}
@@ -123,7 +123,7 @@ func estimateTimeToExit(data *beaconchain.Data) {
 			} else {
 				slotsToNextWithdraw = data.ValidatorsCount - minipool.Index
 			}
-			minipool.TimeToWithdrawEst = time.Duration(slotsToNextWithdraw / data.WithdrawalPerSlot) * 12 * time.Second // 32 slots per epoch @ 12s per slot
+			minipool.TimeToWithdrawEst = time.Duration(slotsToNextWithdraw/data.WithdrawalPerSlot) * 12 * time.Second // 32 slots per epoch @ 12s per slot
 		case "pending_initialized", "pending_queued", "withdrawal_done":
 			minipool.TimeToExit = 0
 		}
@@ -149,14 +149,14 @@ func printTimeToExit(data *beaconchain.Data) {
 
 		case "active_ongoing":
 			if minipool.TimeToExitStart > 0 {
-				fmt.Printf("Validator %s is active. You can start the exit it in %s, it will be exitable in %s and withdrawn in roughly %s.\n", 
+				fmt.Printf("Validator %s is active. You can start the exit it in %s, it will be exitable in %s and withdrawn in roughly %s.\n",
 					minipool.PublicKey,
 					minipool.TimeToExitStart,
 					minipool.TimeToExit,
 					minipool.TimeToWithdrawEst,
 				)
 			} else {
-				fmt.Printf("Validator %s is active. If you exit now it will be exitable in %s and withdrawn in roughly %s.\n", 
+				fmt.Printf("Validator %s is active. If you exit now it will be exitable in %s and withdrawn in roughly %s.\n",
 					minipool.PublicKey,
 					minipool.TimeToExit,
 					minipool.TimeToWithdrawEst,
@@ -164,7 +164,7 @@ func printTimeToExit(data *beaconchain.Data) {
 			}
 
 		case "active_slashed":
-			fmt.Printf("Validator %s was slashed, will be exited in %s\n", 
+			fmt.Printf("Validator %s was slashed, will be exited in %s\n",
 				minipool.PublicKey,
 				minipool.TimeToExit,
 			)
@@ -187,7 +187,7 @@ func parseInput() (common.Address, string, error) {
 		}
 
 		nodeAddress = common.HexToAddress(*nodeAddressFlag)
-	}	
+	}
 
 	var eth2Url string
 	if *rpcFlag == "http://localhost:5052" {
@@ -206,6 +206,6 @@ func parseInput() (common.Address, string, error) {
 	}
 
 	eth2Url = strings.TrimRight(eth2Url, "/")
-	
+
 	return nodeAddress, eth2Url, nil
 }

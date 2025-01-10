@@ -30,7 +30,7 @@ import (
 
 const (
 	BURN_CALL_MAX_GAS               = 200000 // roughly 140k to burn
-	ARBITRAGE_UNISWAP_CALL_MAX_GAS  = 325000 // roughly uniswap 180k + burn 140k - warm access
+	ARBITRAGE_UNISWAP_CALL_MAX_GAS  = 350000 // roughly uniswap 180k + burn 140k
 	DISTRIBUTE_CALL_MAX_GAS         = 500000 // roughly 400k
 	ARBITRAGE_PARASWAP_CALL_MAX_GAS = 750000 // in case there is a complicated path, reserve more gas
 
@@ -144,7 +144,7 @@ func BuildCall(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashb
 		dataIn.MinipoolAddresses,
 		dataIn.RETHInstance,
 		dataIn.DryRun,
-	)	
+	)
 	if err != nil {
 		return nil, nil, errors.Join(errors.New("failed to calculate arbitrage data"), err)
 	}
@@ -359,8 +359,10 @@ func CalcualteArbitrageData(
 
 	logger.Debug("calculated rETH to burn", slog.String("rethToBurn", rethToBurn.String()))
 
+	primaryRatio := new(big.Float).Quo(new(big.Float).SetInt(rETHShare), new(big.Float).SetInt(rethToBurn))
+
 	// get best pool to swap rETH
-	poolAddress, uniswapReturnAmountWeth, err := uniswap.GetBestPoolWithdrawArb(ctx, logger, client, rethToBurn)
+	poolAddress, uniswapReturnAmountWeth, err := uniswap.GetBestPoolWithdrawArb(ctx, logger, client, rethToBurn, primaryRatio)
 	if err != nil {
 		return nil, nil, errors.Join(errors.New("failed to get best pool"), err)
 	}

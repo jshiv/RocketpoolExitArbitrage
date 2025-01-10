@@ -39,7 +39,7 @@ func GetBeaconchainData(nodeAddress common.Address, eth2Url string) (*Data, erro
 		return nil, errors.Join(errors.New("failed to get all validators"), err)
 	}
 
-	if err := updateValidatorStatus(data, eth2Url); err != nil { 
+	if err := updateValidatorStatus(data, eth2Url); err != nil {
 		return nil, errors.Join(errors.New("failed to update validator status"), err)
 	}
 
