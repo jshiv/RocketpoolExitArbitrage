@@ -3,7 +3,7 @@
 > **WARNING**  
 > This software is an **initial version** and **has not been thoroughly tested**.  
 > Use at your own risk. No guarantees are provided, and we assume no liability for any potential losses or damages resulting from its use.
-> The flashloan functionality has been tested a few times, and there is some level of confidence in its performance (e.g., [example transaction](https://etherscan.io/tx/0xaa7cb0cb352661dadd2b1248895906b753433b43f5009c5db58ebe5718cfea7f)).
+> The flashloan functionality has been tested a few times, and there is some level of confidence in its performance (e.g., [example transaction](https://etherscan.io/tx/0x6477ef386a2d639d83d318294f4ade78d46f5e8be41846e5a9912c56e824c31f)).
 > Always review the code and run your own tests before using it in a production environment.
 
 ---
@@ -32,19 +32,20 @@ The core objective is to leverage **distribute** calls in combination with **rET
 2. [Smart Contract](#smart-contract) 
 3. [Requirements](#requirements)
 4. [Installation](#installation)  
-5. [Usage](#usage)  
+5. [How to simulate](#how-to-simulate)
+6. [Usage](#usage)  
    - [Scenario 1: If You Already Have rETH](#scenario-1-if-you-already-have-reth)  
    - [Scenario 2: Flashloan Approach](#scenario-2-flashloan-approach)  
-6. [Configuration](#configuration)  
-7. [Stretch Goals / Future Enhancements](#stretch-goals--future-enhancements)  
-8. [License](#license)
+7. [Configuration](#configuration)  
+8. [Stretch Goals / Future Enhancements](#stretch-goals--future-enhancements)  
+9. [License](#license)
 
 ---
 
 ## Known Issues & Limitations
 
 - **Profit Checks with Multiple Pools**  
-  When operating with low discounts and a large number of pools using the `--minipools` flag, the tool does not perform individual profit checks for each pool. This can lead to suboptimal profits across multiple pools. It is recommended to limit the number of pools in a single call to ensure better profitability at times of low discount. **This will improved in a further update**
+  When operating with low discounts and a large number of pools using the `--minipools` flag, the tool does not perform individual profit checks for each pool. This can lead to suboptimal profits across multiple pools. It is recommended to limit the number of pools in a single call to ensure better profitability at times of low discount. The tool will only work with paraswap for larger amounts.
 
 - **Lack of Comprehensive Tests**  
   This initial version lacks thorough testing, especially for the local rETH functionality. Testing for the local rETH integration is planned and will be completed in the coming days to enhance reliability and stability.
@@ -53,7 +54,7 @@ The core objective is to leverage **distribute** calls in combination with **rET
 
 ## Smart Contract
 
-To execute a Flashswap with Uniswap and simultaneously burn rETH within a single transaction, we developed and deployed a custom smart contract. This contract is fully verified on Etherscan and can be viewed [here](https://etherscan.io/address/0x228125B5519861a9176c1E4b12beeb2d41142D92#code). The contract provides two functions. The first (`arb`) executes a flash swap arbitrage call using Uniswap. The second (`arbParaswap`) allows users to take a flash loan via [Morpho](https://morpho.org/) and perform an aggregated swap using Paraswap.
+To execute a Flashswap with Uniswap and simultaneously burn rETH within a single transaction, I developed and deployed a custom smart contract. This contract is fully verified on Etherscan and can be viewed [here](https://etherscan.io/address/0x228125B5519861a9176c1E4b12beeb2d41142D92#code). The contract provides two functions. The first (`arb`) executes a flash swap arbitrage call using Uniswap. The second (`arbParaswap`) allows users to take a flash loan via [Morpho](https://morpho.org/) and perform an aggregated swap using Paraswap.
 
 
 ### Key Features
@@ -111,6 +112,75 @@ For this initial version, **no binaries are provided**. You will need to **insta
 
 ---
 
+## How to simulate
+
+You can use the `--dry-run` option to generate an example bundle without executing it. This option also displays the individual transactions involved. These transactions can be simulated using tools like [Tenderly](tenderly.co). 
+Since the transactions are sent as part of an MEV bundle, their execution depends on the state resulting from the previous transactions. Therefore, it is essential to update the chain state while simulating. Our primary focus is on the final transaction, as it executes the arbitrage.
+Below is an example of the `dry-run` option:
+```
+Any profit will be sent to 0x1..2. This should be your withdrawal address.
+Updated flashbots fee refund recipient to 0x1..2.
+Current gas settings: base fee per gas is 5.13 gwei, tip is 0.01 gwei.
+Sending transaction with a base fee per gas of 7.70 gwei for timely inclusion.
+
+Calculated distribution amounts: 8.004334 ETH sent to NO, 24.007874 ETH sentto rETH contract.
+
+If you want to use tenderly to simulate the arbitrage, you need to overwrite the state for the final transaction:
+    - Set the ETH balance of the rETH contract (0xae78736Cd615f374D3085123A210448E74Fc6393) to 24007874061960000000
+
+Calculated rETH to burn: Burning 21.327726 rETH for 24.007874 ETH at a primary ratio of 1.12566.
+
+Uniswap: Swapping 23.882143 WETH to 21.327726 rETH at a secondary ratio of 1.11977 with a minimum profit of 0.125732. (pool 0x553e9C493678d8606d6a5ba284643dB2110Df823)
+
+Simulated bundle (success):
+    Expected profit after fees: 0.119380, with a tx fee of 0.006351
+    Expected profit after arbitrage fees: 0.123230, with a tx fee of 0.002502 (interesting if you want to distribute regardless)
+
+Dry run. Would have sent the following bundle:
+Transaction 1:
+    From: 0x8..C
+    To: 0x7..4
+    Value: 0
+    Gas Limit: 500000
+    Base Fee: 7698278631 (7.70 Gwei)
+    Priority Fee: 5477241 (0.0055 Gwei)
+    Nonce: 184
+    Data: 5..0
+Transaction 2:
+    From: 0x8..C
+    To: 0x228125B5519861a9176c1E4b12beeb2d41142D92
+    Value: 0
+    Gas Limit: 325000
+    Base Fee: 7698278631 (7.70 Gwei)
+    Priority Fee: 5477241 (0.0055 Gwei)
+    Nonce: 185
+    Data: a..9
+```
+
+As you can see, it prints the necessary state updates.
+
+To simulate the arbitrage transaction, open Tenderly and navigate to the "Simulator" page. From there, create a new transaction. Enter the details for `Transaction 2` as follows:
+1. First the `To` address.
+2. Select `Mainnet` as the network.
+3. Choose the `Enter raw input data` option and paste the `Data` from the output.
+
+![Example Inputs](png/simulator_input.png)
+
+Next, configure the state overwrite. Expand the `State Overrides` option on the right side and follow these steps:
+1. Click `Add State Override`.
+2. Select `Custom Contract` and enter the address printed in the output (rETH contract - `0xae78736Cd615f374D3085123A210448E74Fc6393`).
+3. Choose the `Use custom balance value` option and input the amount from the output (here `24007874061960000000`). This represents the amount of ETH in Wei sent to the rETH contract: 
+
+![Example Override](png/state_override.png)
+
+Now you can simulate the transaction. Focus on observing the `State` changes. Key things to verify include:
+- The balance change in the receiver's address.
+- Ensuring the `rETH` contract balance remains mostly unchanged.
+
+Additionally, you could review the emitted events. Look for the `Arbitrage` event, which displays details such as the `receiver` and the `profit` (before fees). 
+
+---
+
 ## Usage
 
 ### Scenario 1: If You Already Have rETH
@@ -118,6 +188,16 @@ For this initial version, **no binaries are provided**. You will need to **insta
 ### Scenario 2: Flashloan Approach
 
 In this approach, the CLI constructs a transaction bundle that initially distributes all pools specified with the flags. It then adds an arbitrage transaction calculated based on the total amount of ETH collected. When using smartnode with the default docker configuration, you usually only need to add the address (`--minipool` or `--minipools`). If you modifyed the default port, use the  `--rpc-port` flag to set the new port. If you have an external eth1 client, use the `--rpc` flag. 
+
+There are two different ways to execute the arbitrage call. The first method involves a Uniswap flash swap arbitrage as described in the [Uniswap documentation](https://docs.uniswap.org/contracts/v2/concepts/core-concepts/flash-swaps). In this method, rETH is swapped for WETH at the secondary Uniswap rate, and then rETH is burned at the protocol rate. The profit is derived from the difference between the two rates.
+The second method takes a flash loan via [Morpho](https://morpho.org/) to perform an aggregated swap using Paraswap. This approach utilizes Paraswap's aggregation capabilities to find the most efficient swaps.
+
+By default, the system fetches quotes from both methods and automatically selects the one that yields the highest profit. However, you can explicitly choose the execution method by using the `--protocol` flag:
+- Use `--protocol=uniswap` to force the system to perform the Uniswap flash swap arbitrage.
+- Use `--protocol=paraswap` to force the system to perform the aggregated swap via Morpho and Paraswap.
+
+This flexibility allows you to tailor the arbitrage strategy based on your specific preferences or constraints.
+
 
 The workflow proceeds as follows:
 
@@ -131,29 +211,30 @@ The workflow proceeds as follows:
 
 Below is an example workflow for finalizing a single minipool:
 ```
-ubuntu@rocketnode:~$ ./distribute --minipools 0x21...5a
-Updated flashbots fee refund recipient to node address (0x84...4E)
-Calculated distribution amounts: 8.003592 ETH send to NO, 24.006526 ETH send to RP
+rocketnode:~$ ./distribute --minipools 0xC..2
+Any profit will be sent to 0x2..9. This should be your withdrawal address.
+Updated flashbots fee refund recipient to 0x2..9.
+Current gas settings: base fee per gas is 5.03 gwei, tip is 0.01 gwei.
+Sending transaction with a base fee per gas of 7.55 gwei for timely inclusion.
 
-Selected uniswap pool - 0x553e9C493678d8606d6a5ba284643dB2110Df823:
-    Swapping 23.906471 WETH to 21.331199 rETH at a secondary ratio of 1.12073
+Calculated distribution amounts: 8.003947 ETH sent to NO, 24.007171 ETH sent to rETH contract.
 
-Calculated rETH to burn: Burning 21.331199 rETH for 24.006526 ETH at a primary ratio of 1.12542.
+Calculated rETH to burn: Burning 21.327102 rETH for 24.007171 ETH at a primary ratio of 1.12566.
 
-Calculated Arbitrage: expected profit (before fees) = 0.100055 ETH
+Uniswap: Swapping 23.894471 WETH to 21.327102 rETH at a secondary ratio of 1.12038 with an expected profit of 0.112701. (pool 0x5..3)
+Paraswap: Swapping 23.894471 WETH to 21.327102 rETH at a secondary ratio of 1.12038 with an expected profit of 0.112701.
+Uniswap is better, will use Uniswap.
 
-Current gas settings: base fee per gas is 7.19 gwei, tip is 0.10 gwei.
-Sending transaction with a base fee per gas of 10.79 gwei for timely inclusion.
-
-Simulated bundle (Success: true):
-    Expected profit after fees: 0.090342, with a tx fee of 0.009712
-    Expected profit after arbitrage fees: 0.095738, with a tx fee of 0.004317 (interesting if you want to distribute regardless)
+Simulated bundle (success):
+    Expected profit after fees: 0.106471, with a tx fee of 0.006230
+    Expected profit after arbitrage fees: 0.110247, with a tx fee of 0.002454 (interesting if you want to distribute regardless)
 
 Do you want to proceed? (y/n): y
 
-Sent bundle with hash: 0xca...54. Waiting for up to one minute to see if the transaction is included...
+Sent bundle with hash: 0xb..8. Waiting for up to one minute to see if the transaction is included...
 
-Distributed minipool! Arbitrage tx: https://etherscan.io/tx/0x65...5a
+Distributed minipool! Arbitrage tx: https://etherscan.io/tx/0x6477ef386a2d639d83d318294f4ade78d46f5e8be41846e5a9912c56e824c31f
+
 ```
 
 ## Bundle Status Logging
