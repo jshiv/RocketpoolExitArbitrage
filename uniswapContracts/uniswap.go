@@ -44,7 +44,7 @@ func GetBestPool(ctx context.Context, logger *slog.Logger, client *ethclient.Cli
 		return common.Address{}, nil, errors.Join(errors.New("failed to get pool A"), err)
 	}
 
-	if logger.Enabled(ctx, slog.LevelDebug) {
+	if logger != nil && logger.Enabled(ctx, slog.LevelDebug) {
 		poolAAmountFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(poolAAmountIn), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
 		logger.Debug("0.01 percent pool", slog.String("address", PoolB), slog.Float64("Amount In", poolAAmountFloat))
 	}
@@ -58,7 +58,7 @@ func GetBestPool(ctx context.Context, logger *slog.Logger, client *ethclient.Cli
 		return common.HexToAddress(PoolA), poolAAmountIn, nil
 	}
 
-	if logger.Enabled(ctx, slog.LevelDebug) {
+	if logger != nil && logger.Enabled(ctx, slog.LevelDebug) {
 		poolBAmountInFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(poolBAmountIn), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
 		logger.Debug("0.05 percent pool", slog.String("address", PoolA), slog.Float64("Amount In", poolBAmountInFloat))
 	}

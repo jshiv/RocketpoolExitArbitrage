@@ -69,7 +69,7 @@ func BuildCallLocalReth(ctx context.Context, logger *slog.Logger, dataIn DataIn)
 		return nil, nil, nil, errors.Join(errors.New("failed to generate distribute calls"), err)
 	}
 
-	rETHShare, err := calcaulteDistributedBalance(ctx, logger, dataIn)
+	rETHShare, err := CalcaulteDistributedBalance(ctx, logger, dataIn.Client, dataIn.MinipoolAddresses)
 	if err != nil {
 		return nil, nil, nil, errors.Join(errors.New("failed to calculate distributed balance"), err)
 	}
@@ -136,7 +136,15 @@ func BuildCall(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashb
 		return nil, nil, errors.Join(errors.New("failed to generate distribute calls"), err)
 	}
 
-	uniswapData, paraswapData, err := calcualteArbitrageData(ctx, logger, dataIn)
+	uniswapData, paraswapData, err := CalcualteArbitrageData(
+		ctx,
+		logger,
+		dataIn.Client,
+		dataIn.NodeAddress,
+		dataIn.MinipoolAddresses,
+		dataIn.RETHInstance,
+		dataIn.DryRun,
+	)	
 	if err != nil {
 		return nil, nil, errors.Join(errors.New("failed to calculate arbitrage data"), err)
 	}
@@ -270,11 +278,11 @@ func BuildCall(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashb
 	return bundle, expectedProfit, nil
 }
 
-func calcaulteDistributedBalance(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*big.Int, error) {
+func CalcaulteDistributedBalance(ctx context.Context, logger *slog.Logger, client *ethclient.Client, minipoolAddresses []common.Address) (*big.Int, error) {
 	totalNodeShare := new(big.Int)
 	totalDistributeAmount := new(big.Int)
-	for _, minipoolAddress := range dataIn.MinipoolAddresses {
-		balance, err := dataIn.Client.BalanceAt(ctx, minipoolAddress, nil)
+	for _, minipoolAddress := range minipoolAddresses {
+		balance, err := client.BalanceAt(ctx, minipoolAddress, nil)
 		if err != nil {
 			return nil, errors.Join(errors.New("failed to get minipool balance"), err)
 		}
@@ -284,7 +292,7 @@ func calcaulteDistributedBalance(ctx context.Context, logger *slog.Logger, dataI
 			slog.String("balance", balance.String()),
 		)
 
-		minipoolInstance, err := minipoolDelegate.NewMinipoolDelegate(minipoolAddress, dataIn.Client)
+		minipoolInstance, err := minipoolDelegate.NewMinipoolDelegate(minipoolAddress, client)
 		if err != nil {
 			return nil, err
 		}
@@ -315,25 +323,36 @@ func calcaulteDistributedBalance(ctx context.Context, logger *slog.Logger, dataI
 
 	totalNodeShareFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(totalNodeShare), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
 	rETHShareFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(totalDistributeAmount), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
-	fmt.Printf("Calculated distribution amounts: %.6f ETH sent to NO, %.6f ETH sent to rETH contract.\n\n", totalNodeShareFloat, rETHShareFloat)
+
+	if logger.Enabled(ctx, slog.LevelInfo) {
+		fmt.Printf("Calculated distribution amounts: %.6f ETH sent to NO, %.6f ETH sent to rETH contract.\n\n", totalNodeShareFloat, rETHShareFloat)
+	}
 
 	return totalDistributeAmount, nil
 }
 
-func calcualteArbitrageData(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*UniswapArbitrage, *ParaswapArbitrage, error) {
-	rETHShare, err := calcaulteDistributedBalance(ctx, logger, dataIn)
+func CalcualteArbitrageData(
+	ctx context.Context,
+	logger *slog.Logger,
+	client *ethclient.Client,
+	senderAddress *common.Address,
+	minipoolAddresses []common.Address,
+	rethInstance *rETH.RETH,
+	dryRun bool,
+) (*UniswapArbitrage, *ParaswapArbitrage, error) {
+	rETHShare, err := CalcaulteDistributedBalance(ctx, logger, client, minipoolAddresses)
 	if err != nil {
 		return nil, nil, errors.Join(errors.New("failed to calculate distributed balance"), err)
 	}
 
-	if dataIn.DryRun {
+	if dryRun {
 		fmt.Println(string(colorRed), "If you want to use tenderly to simulate the arbitrage, you need to overwrite the state for the final transaction:")
 		fmt.Printf("    - Set the ETH balance of the rETH contract (%s) to %s\n", rEthContractAddressStr, rETHShare.String())
 		fmt.Println(string(colorReset))
 	}
 
 	// calcaulte amount rETH to burn
-	rethToBurn, err := ConvertWethToReth(ctx, dataIn.RETHInstance, rETHShare)
+	rethToBurn, err := ConvertWethToReth(ctx, rethInstance, rETHShare)
 	if err != nil {
 		return nil, nil, errors.Join(errors.New("failed to convert rETH to WETH"), err)
 	}
@@ -341,26 +360,9 @@ func calcualteArbitrageData(ctx context.Context, logger *slog.Logger, dataIn Dat
 	logger.Debug("calculated rETH to burn", slog.String("rethToBurn", rethToBurn.String()))
 
 	// get best pool to swap rETH
-	poolAddress, uniswapReturnAmountWeth, err := uniswap.GetBestPoolWithdrawArb(ctx, logger, dataIn.Client, rethToBurn)
+	poolAddress, uniswapReturnAmountWeth, err := uniswap.GetBestPoolWithdrawArb(ctx, logger, client, rethToBurn)
 	if err != nil {
 		return nil, nil, errors.Join(errors.New("failed to get best pool"), err)
-	}
-
-	// early exit if we use the users rETH
-	if dataIn.LocalReth {
-		if logger.Enabled(ctx, slog.LevelInfo) {
-			poolAmountInFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(uniswapReturnAmountWeth), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
-			poolAmountOutFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(rethToBurn), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
-			secondaryRatio := poolAmountInFloat / poolAmountOutFloat
-
-			rethToBurnFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(rethToBurn), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
-			ethUnlockedFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(rETHShare), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
-			primaryRatio := ethUnlockedFloat / rethToBurnFloat
-
-			fmt.Printf("At the secondary ratio of %f, you would swap %.6f rETH to %.6f WETH\n\n", secondaryRatio, poolAmountOutFloat, poolAmountInFloat)
-			fmt.Printf("At the primary ratio of %f, you will burn %.6f rETH for %.6f ETH\n\n", primaryRatio, rethToBurnFloat, ethUnlockedFloat)
-		}
-		return nil, nil, nil
 	}
 
 	if logger.Enabled(ctx, slog.LevelInfo) {
@@ -385,7 +387,7 @@ func calcualteArbitrageData(ctx context.Context, logger *slog.Logger, dataIn Dat
 	}
 
 	// fetch paraswap data
-	dataParaswap, err := fetchParaswapData(ctx, logger, rethToBurn, dataIn.NodeAddress)
+	dataParaswap, err := fetchParaswapData(ctx, logger, rethToBurn, senderAddress)
 	if err != nil {
 		return nil, nil, errors.Join(errors.New("failed to fetch paraswap data"), err)
 	}
@@ -611,7 +613,7 @@ func signTransaction(logger *slog.Logger, apiCommand string, tx *types.Transacti
 	return &signedTx, nil
 }
 
-func fetchParaswapData(ctx context.Context, logger *slog.Logger, amount *big.Int, userAddress *common.Address) (*ParaswapArbitrage, error) {
+func fetchParaswapData(ctx context.Context, logger *slog.Logger, amount *big.Int, senderAddress *common.Address) (*ParaswapArbitrage, error) {
 	urlPrices := fmt.Sprintf("https://api.paraswap.io/prices?network=1&version=6.2&slippage=50&srcToken=%s&srcDecimals=18&destToken=%s&destDecimals=18&amount=%s&side=BUY&userAddress=%s",
 		WETHContractAddressStr,
 		rEthContractAddressStr,
@@ -694,7 +696,7 @@ func fetchParaswapData(ctx context.Context, logger *slog.Logger, amount *big.Int
 		SrcAmount:    prices.PriceRoute.SrcAmount,
 		DestAmount:   prices.PriceRoute.DestAmount,
 		PriceRoute:   innerPriceRoute,
-		TxOrigin:     userAddress.String(),
+		TxOrigin:     senderAddress.String(),
 		UserAddress:  arbitrageContractAddressStr,
 	}
 

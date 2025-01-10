@@ -45,6 +45,14 @@ type UniswapArbitrage struct {
 	poolAddress             common.Address
 }
 
+func (ua *UniswapArbitrage) GetExpectedProfit() *big.Int {
+	return new(big.Int).Set(ua.expectedProfit)
+}
+
+func (ua *UniswapArbitrage) GetSwapInAmountWeth() *big.Int {
+	return new(big.Int).Set(ua.swapInAmountWeth)
+}
+
 type ParaswapArbitrage struct {
 	expectedProfit          *big.Int
 	expectedProfitAfterFees *big.Int
@@ -52,6 +60,14 @@ type ParaswapArbitrage struct {
 	swapOutAmountReth       *big.Int
 	expectedFee             int
 	calldata                []byte
+}
+
+func (pa *ParaswapArbitrage) GetExpectedProfit() *big.Int {
+	return new(big.Int).Set(pa.expectedProfit)
+}
+
+func (ua *ParaswapArbitrage) GetSwapInAmountWeth() *big.Int {
+	return new(big.Int).Set(ua.swapInAmountWeth)
 }
 
 type OneInchTokenInfo struct {
