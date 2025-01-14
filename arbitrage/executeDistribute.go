@@ -21,10 +21,6 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
-const (
-	rocketpoolStorageAddressStr = "0x1d8f8f00cfa6758d7bE78336684788Fb0ee0Fa46"
-)
-
 func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn) error {
 	logger.With(slog.String("function", "Simulate"))
 
@@ -37,15 +33,20 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 
 	// get node withdraw address
 	isWithdrawalAddress := false
+	isNodeAddress := false
 	if dataIn.ReceiverAddress == nil {
-		withdrawalAddress, err := getWithdrawalAddress(ctx, dataIn.Client, *dataIn.NodeAddress)
+		withdrawalAddress, err := getWithdrawalAddress(ctx, dataIn.Client, dataIn.NetworkId, *dataIn.NodeAddress)
 		if err != nil {
 			return errors.Join(errors.New("failed to get withdrawal address"), err)
 		}
 
 		logger.Debug("receiver address not set, updated to withdraw address", slog.String("receiverAddress", withdrawalAddress.Hex()))
 		dataIn.ReceiverAddress = &withdrawalAddress
-		isWithdrawalAddress = true
+		if withdrawalAddress.Cmp(*dataIn.NodeAddress) == 0 {
+			isNodeAddress = true
+		} else {
+			isWithdrawalAddress = true
+		}
 	}
 
 	// update user on receiver address
@@ -54,13 +55,15 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 		fmt.Print(colorOrange, (*dataIn.ReceiverAddress).Hex(), colorReset)
 		if isWithdrawalAddress {
 			fmt.Println(". This should be your withdrawal address.")
+		} else if isNodeAddress {
+			fmt.Println(". This should be your node address.")
 		} else {
 			fmt.Println(". Set with the --receiver flag.")
 		}
 	}
 
 	// if using a random private key, update the fee refund recipient to the receiver address
-	if dataIn.RandomPrivateKey {
+	if dataIn.RandomPrivateKey && dataIn.NetworkId != 17000 {
 		err = dataIn.FbClient.UpdateFeeRefundRecipient(*dataIn.ReceiverAddress)
 		if err != nil {
 			return errors.Join(errors.New("failed to update flashbots fee refund recipient"), err)
@@ -76,7 +79,6 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 	var bundle *flashbots_client.Bundle
 	var rethToBurn, rETHShare, expectedProfit *big.Int
 	if dataIn.LocalReth {
-		return errors.New("not yet tested. Feel free to modify and execute on your own risk.")
 		bundle, rethToBurn, rETHShare, err = BuildCallLocalReth(ctx, logger, *dataIn)
 		if err != nil {
 			return errors.Join(errors.New("failed to build call"), err)
@@ -177,11 +179,7 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 	}
 
 	// add more builders to improve chance to be included
-	networkID, err := dataIn.Client.NetworkID(ctx)
-	if err != nil {
-		return errors.Join(errors.New("failed to get network id"), err)
-	}
-	bundle.UseAllBuilders(networkID.Uint64())
+	bundle.UseAllBuilders(dataIn.NetworkId)
 
 	// set target block number
 	blockNumber, err := dataIn.Client.BlockNumber(ctx)
@@ -193,7 +191,7 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 	fmt.Printf("\nSent bundle with hash: %s. Waiting for up to one minute to see if the transaction is included...\n\n", res.BundleHash)
 
 	timeoutContext, cancel := context.WithTimeout(ctx, time.Second*60)
-	successfullyIncluded, err := dataIn.FbClient.SendNBundleAndWait(timeoutContext, bundle, 3)
+	successfullyIncluded, err := dataIn.FbClient.SendNBundleAndWait(timeoutContext, bundle, 4)
 	cancel()
 	if err != nil {
 		return errors.Join(errors.New("failed to wait for bundle inclusion"), err)
@@ -204,12 +202,25 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 	}
 
 	// print successful inclusion and tx link
+	var txType string
+	if dataIn.LocalReth {
+		txType = "Burn"
+	} else {
+		txType = "Arbitrage"
+	}
+
+	explorer := ""
+	if dataIn.NetworkId == 1 {
+		explorer = "https://etherscan.io/tx/"
+	} else if dataIn.NetworkId == 17000 {
+		explorer = "https://explorer.holesky.io/tx/"
+	}
 	if len(res.Results) == 2 {
 		arbTx := res.Results[1]
-		fmt.Printf("Distributed minipool! Arbitrage tx: https://etherscan.io/tx/%s\n\n", arbTx.TxHash.Hex())
+		fmt.Printf("Distributed minipool! %s tx: %s%s\n\n", txType, explorer, arbTx.TxHash.Hex())
 	} else {
 		arbTx := res.Results[len(res.Results)-1]
-		fmt.Printf("Distributed minipools! Arbitrage tx: https://etherscan.io/tx/%s\n\n", arbTx.TxHash.Hex())
+		fmt.Printf("Distributed minipools! %s tx: %s%s\n\n", txType, explorer, arbTx.TxHash.Hex())
 	}
 
 	return nil
@@ -243,8 +254,11 @@ func waitForUserConfirmation() bool {
 	}
 }
 
-func getWithdrawalAddress(ctx context.Context, client *ethclient.Client, nodeAddress common.Address) (common.Address, error) {
-	rocketpoolStorageAddress := common.HexToAddress(rocketpoolStorageAddressStr)
+func getWithdrawalAddress(ctx context.Context, client *ethclient.Client, networkId uint64, nodeAddress common.Address) (common.Address, error) {
+	rocketpoolStorageAddress, err := GetRocketpoolStorageAddress(networkId)
+	if err != nil {
+		return common.Address{}, errors.Join(errors.New("failed to get rocketpool storage address"), err)
+	}
 
 	storageInterface, err := storage.NewStorage(rocketpoolStorageAddress, client)
 	if err != nil {
@@ -263,5 +277,6 @@ func getWithdrawalAddress(ctx context.Context, client *ethclient.Client, nodeAdd
 	if err != nil {
 		return common.Address{}, errors.Join(errors.New("failed to get node withdrawal address"), err)
 	}
+
 	return address, nil
 }
