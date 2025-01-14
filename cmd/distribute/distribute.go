@@ -8,17 +8,12 @@ import (
 	"fmt"
 	"log/slog"
 	"rocketpoolArbitrage/arbitrage"
-	"rocketpoolArbitrage/rocketpoolContracts/rETH"
 	"strings"
 
 	"github.com/0xtrooper/flashbots_client"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
-)
-
-const (
-	rETHAddressStr = "0xae78736Cd615f374D3085123A210448E74Fc6393"
 )
 
 func main() {
@@ -60,11 +55,16 @@ func parseInput(ctx context.Context, logger *slog.Logger) (data *arbitrage.DataI
 	flag.BoolVar(&data.SkipConfirmation, "skip-confirmation", false, "Skip confirmation prompt before executing")
 	flag.BoolVar(&data.SkipConfirmation, "y", false, "Short flag for --skip-confirmation")
 	flag.BoolVar(&data.CheckProfit, "check-profit", true, "If enabled, reverts when the profit is too low. (Default: true)")
-	flag.BoolVar(&data.CheckProfitIgnoreDistributeCost, "ignoreDistributeCost", false, "Reverts when the profit is too low, but does not considering the distribute call(s). Best used if you want to distribute either way.")
+	flag.BoolVar(&data.CheckProfitIgnoreDistributeCost, "ignore-distribute-cost", false, "Reverts when the profit is too low, but does not considering the distribute call(s). Best used if you want to distribute either way.")
 	flag.BoolVar(&data.DryRun, "dry-run", false, "Perform a dry run without sending the bundle to Flashbots; only print the transaction bundle.")
 	nodeAddressFlag := flag.String("node-address", "", "Node address used as caller. If not set, the first minipool's node address is used.")
 	protocolFlag := flag.String("protocol", "best", "Protocol to use for arbitrage. Options: best, uniswap, paraswap")
 	receiverFlag := flag.String("receiver", "", "Receiver address for the arbitrage. If not set, the node address is used.")
+	nodeAddressPrivateKey := flag.String(
+		"node-private-key",
+		"",
+		"Private key for the node address used as caller. This can be used if the script should not use the RP daemon to sign transactions. (e.g. when using Allnode)",
+	)
 
 	flag.Parse()
 
@@ -120,27 +120,23 @@ func parseInput(ctx context.Context, logger *slog.Logger) (data *arbitrage.DataI
 		url = *rpcFlag
 	}
 
-	client, err := ethclient.DialContext(ctx, url)
+	data.Client, err = ethclient.DialContext(ctx, url)
 	if err != nil {
 		return nil, errors.Join(errors.New("failed to connect to rpc"), err)
 	}
 
-	networkID, err := client.NetworkID(ctx)
+	networkID, err := data.Client.NetworkID(ctx)
 	if err != nil {
 		return nil, errors.Join(errors.New("failed to verify client connection"), err)
 	}
 
-	if networkID.Uint64() != 1 && networkID.Uint64() != 17000 {
+	data.NetworkId = networkID.Uint64()
+
+	if data.NetworkId != 1 && data.NetworkId != 17000 {
 		return nil, errors.New("only mainnet and holesky are supported")
 	}
 
-	data.Client = client
 	logger.Debug("rpc connected and verified")
-
-	data.RETHInstance, err = rETH.NewRETH(common.HexToAddress(rETHAddressStr), data.Client)
-	if err != nil {
-		return nil, err
-	}
 
 	var privateKey *ecdsa.PrivateKey
 	if *SercherPrivateKeyFlag != "" {
@@ -164,13 +160,41 @@ func parseInput(ctx context.Context, logger *slog.Logger) (data *arbitrage.DataI
 		return nil, errors.Join(errors.New("failed to create flashbots client"), err)
 	}
 
+	if *nodeAddressPrivateKey != "" {
+		*nodeAddressPrivateKey = strings.TrimPrefix(*nodeAddressPrivateKey, "0x")
+
+		privateKey, err = crypto.HexToECDSA(*nodeAddressPrivateKey)
+		if err != nil {
+			return nil, errors.Join(errors.New("failed to parse ECDSA private key for node address"), err)
+		}
+
+		data.NodeAddressPrivateKey = privateKey
+
+		publicKey := privateKey.Public()
+		publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
+		if !ok {
+			return nil, errors.New("error casting public key to ECDSA")
+		}
+		data.NodeAddress = new(common.Address)
+		*data.NodeAddress = crypto.PubkeyToAddress(*publicKeyECDSA)
+		fmt.Printf("Using provided ECDSA private key for node address (Address: %s)\n", data.NodeAddress.Hex())
+	}
+
 	if *nodeAddressFlag != "" {
 		if !common.IsHexAddress(*nodeAddressFlag) {
 			return nil, errors.New("node address is invalid")
 		}
 
 		nodeAddress := common.HexToAddress(*nodeAddressFlag)
-		data.NodeAddress = &nodeAddress
+
+		if *nodeAddressPrivateKey != "" {
+			// sanity check in case user provided a private key
+			if nodeAddress.Cmp(*data.NodeAddress) != 0 {
+				return nil, errors.New("node address does not match the provided private key")
+			}
+		} else {
+			data.NodeAddress = &nodeAddress
+		}
 		logger.Debug("nodeAddress", slog.String("nodeAddress", nodeAddress.Hex()))
 	}
 
@@ -208,6 +232,10 @@ func parseInput(ctx context.Context, logger *slog.Logger) (data *arbitrage.DataI
 		slog.Bool("checkProfitFlag", data.CheckProfit),
 		slog.Bool("ignoreDistributeCostFlag", data.CheckProfitIgnoreDistributeCost),
 	)
+
+	if data.NetworkId == 17000 && !data.LocalReth {
+		return nil, errors.New("holesky does not support flashloan's")
+	}
 
 	return data, nil
 }

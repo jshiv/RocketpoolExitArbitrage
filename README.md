@@ -70,19 +70,21 @@ While the smart contract is designed with streamlined functionality and minimal 
 ## Requirements
 
 1. **Go (version 1.22+ recommended)**
-   - You can download and install Go from the official [Go Downloads page](https://go.dev/dl/).  
-   - Refer to the official [Getting Started](https://go.dev/doc/install) guide for further instructions.  
-   - Earlier versions (e.g., 1.20, 1.21) may still work, but are **not** tested.
+    - You can download and install Go from the official [Go Downloads page](https://go.dev/dl/).  
+    - Refer to the official [Getting Started](https://go.dev/doc/install) guide for further instructions.  
+    - Earlier versions (e.g., 1.20, 1.21) may still work, but are **not** tested.
 
 2. **Access to a Web3 Provider**
-   - Typically this is your **Rocket Pool Eth1 client** (e.g., Geth, Nethermind).  
-   - Ensure that your Rocket Pool setup has `Expose RPC Ports` configured to `Open to Localhost`.
+    - Typically this is your **Rocket Pool Eth1 client** (e.g., Geth, Nethermind).
+        - This can also be a WEB3 provider like [infura](https://docs.metamask.io/services/get-started/infura/). Set the full RPC URL with `--rpc ...` 
+    - Ensure that your Rocket Pool setup has `Expose RPC Ports` configured to `Open to Localhost`.
 
 3. **Minipool Exit Completed**
-   - To finalize a minipool and distribute the full 32 ETH, the validator must be **exited from the consensus layer**.  
-   - Use the **Rocket Pool** command `rocketpool m e` to initiate the exit.  
-   - Wait until the exit is fully processed and ETH is withdrawn from the consensus layer before proceeding with distribution.  
-   - You can monitor progress in your node logs or by using on-chain explorers to confirm that ETH has been returned.
+    - To finalize a minipool and distribute the full 32 ETH, the validator must be **exited from the consensus layer**.  
+    - Use the **Rocket Pool** command `rocketpool m e` to initiate the exit.  
+        - For Allnodes, users, click the 3 dots to the right of your minipool and select `Voluntary exit`.
+    - Wait until the exit is fully processed and ETH is withdrawn from the consensus layer before proceeding with distribution.  
+    - You can monitor progress in your node logs or by using on-chain explorers to confirm that ETH has been returned.
 
 ---
 
@@ -237,6 +239,29 @@ Distributed minipool! Arbitrage tx: https://etherscan.io/tx/0x6477ef386a2d639d83
 
 ```
 
+---
+
+## Running the CLI tool on an external machine
+
+If you prefer not to run the CLI tool on your validator machine or if you are an Allnodes user, you can execute the tool on an external machine. Follow these steps:
+
+1. **Set Up the External Machine**:
+    - Ensure that the external machine meets the [requirements](#requirements) listed above, including having Go installed and access to a Web3 provider. This can be the smartnode client; make sure the eth1 config is set accordingly. 
+    - Follow the [Installation](#installation) steps to clone the repository and build the binary on the external machine.
+
+2. **Run the CLI Tool**:
+    - Use the `--minipool`/`--minipools` flag to specify the minipools to be distributed.
+    - Use the `--rpc` flag to specify the RPC endpoint of your Web3 provider.
+    - Use the `--node-private-key` flag to provide the private key for the node address used as the caller.
+    - Example command:
+    ```bash
+    ./distribute --rpc="your_rpc_url" --node-private-key="your_private_key" --minipools="0xABC123...,0xDEF456..."
+    ```
+
+By following these steps, you can safely run the CLI tool on an external machine, ensuring that your validator machine remains secure and isolated from potential risks associated with running additional software. While the tool has access to the node operator hot wallet, this address should not contain a lot of ETH. Therfor the risk is minimal. 
+
+---
+
 ## Bundle Status Logging
 
 When using the `--debug` option, the tool provides detailed updates about the bundle status. For example, the output could look like this:
@@ -352,6 +377,19 @@ This CLI tool is configured primarily through command-line flags. Below is a lis
     **Example**:
     ```bash
     ./distribute --node-address="0xYourNodeAddress"
+    ```
+
+---
+
+## Node Address Private Key
+
+- **Flag**: `--node-private-key`
+    **Type**: string
+    **Default**: (empty)
+    **Description**: Specifies the private key for the node address used as the caller. This can be used if the script should not use the Rocket Pool daemon to sign transactions. For example, when using external services like Allnode.
+    **Example**:
+    ```bash
+    ./distribute --node-private-key="your_private_key"
     ```
 
 ---

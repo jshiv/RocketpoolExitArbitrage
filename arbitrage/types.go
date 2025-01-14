@@ -1,9 +1,9 @@
 package arbitrage
 
 import (
+	"crypto/ecdsa"
 	"encoding/json"
 	"math/big"
-	"rocketpoolArbitrage/rocketpoolContracts/rETH"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -23,9 +23,9 @@ type DataIn struct {
 	Command                         string
 	LocalReth                       bool
 	MinipoolAddresses               []common.Address
+	NodeAddressPrivateKey           *ecdsa.PrivateKey
 	NodeAddress                     *common.Address
 	ReceiverAddress                 *common.Address
-	RETHInstance                    *rETH.RETH
 	Client                          *ethclient.Client
 	FbClient                        *flashbots_client.FlashbotsClient
 	RandomPrivateKey                bool
@@ -34,13 +34,17 @@ type DataIn struct {
 	CheckProfitIgnoreDistributeCost bool
 	DryRun                          bool
 	Protocol                        Protocol
+	NetworkId                       uint64
 }
 
 type UniswapArbitrage struct {
 	expectedProfit          *big.Int
 	expectedProfitAfterFees *big.Int
+
 	swapInAmountWeth        *big.Int
 	swapOutAmountReth       *big.Int
+	sqrtPriceLimitX96 		*big.Int
+
 	expectedFee             int
 	poolAddress             common.Address
 }

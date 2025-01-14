@@ -17,10 +17,6 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
-const (
-	rETHAddressStr = "0xae78736Cd615f374D3085123A210448E74Fc6393"
-)
-
 func main() {
 	nodeAddress, eth1Url, eth2Url, err := parseInput()
 	if err != nil {
@@ -174,9 +170,9 @@ func parseInput() (common.Address, string, string, error) {
 }
 
 func estimateProfit(ctx context.Context, logger *slog.Logger, client *ethclient.Client, nodeAddress common.Address, data *beaconchain.Data) (*big.Int, *big.Int, error) {
-	rethInstance, err := rETH.NewRETH(common.HexToAddress(rETHAddressStr), client)
+	networkID, err := client.NetworkID(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, errors.Join(errors.New("failed to get network ID"), err)
 	}
 
 	addresses := make([]common.Address, len(data.Minipools))
@@ -190,7 +186,7 @@ func estimateProfit(ctx context.Context, logger *slog.Logger, client *ethclient.
 		client,
 		&nodeAddress,
 		addresses,
-		rethInstance,
+		networkID.Uint64(),
 		false,
 		arbitrage.BestProtocol,
 	)
@@ -209,7 +205,17 @@ func estimateProfit(ctx context.Context, logger *slog.Logger, client *ethclient.
 }
 
 func getExampleProfits(ctx context.Context, logger *slog.Logger, client *ethclient.Client, amountToDistribute int) (float64, error) {
-	rethInstance, err := rETH.NewRETH(common.HexToAddress(rETHAddressStr), client)
+	networkID, err := client.NetworkID(ctx)
+	if err != nil {
+		return 0, errors.Join(errors.New("failed to get network ID"), err)
+	}
+
+	rETHAddress, err := arbitrage.GetREthContractAddress(networkID.Uint64())
+	if err != nil {
+		return 0, errors.Join(errors.New("failed to get rETH contract address"), err)
+	}
+
+	rethInstance, err := rETH.NewRETH(rETHAddress, client)
 	if err != nil {
 		return 0, err
 	}
@@ -221,7 +227,8 @@ func getExampleProfits(ctx context.Context, logger *slog.Logger, client *ethclie
 	}
 
 	// get best pool to swap rETH
-	_, uniswapReturnAmountWeth, err := uniswap.GetBestPoolWithdrawArb(ctx, logger, client, rethToBurn, nil)
+	ratio := new(big.Float).SetFloat64(1.99)
+	_, uniswapReturnAmountWeth, _, err := uniswap.GetBestPoolWithdrawArb(ctx, logger, client, rethToBurn, ratio)
 	if err != nil {
 		return 0, errors.Join(errors.New("failed to get best pool"), err)
 	}
