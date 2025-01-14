@@ -3,6 +3,7 @@ package arbitrage
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -33,11 +34,6 @@ const (
 	ARBITRAGE_UNISWAP_CALL_MAX_GAS  = 350000 // roughly uniswap 180k + burn 140k
 	DISTRIBUTE_CALL_MAX_GAS         = 500000 // roughly 400k
 	ARBITRAGE_PARASWAP_CALL_MAX_GAS = 750000 // in case there is a complicated path, reserve more gas
-
-	arbitrageContractAddressStr = "0x228125B5519861a9176c1E4b12beeb2d41142D92"
-	rEthContractAddressStr      = "0xae78736Cd615f374D3085123A210448E74Fc6393"
-	WETHContractAddressStr      = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
-	ParaswapV6_2AddressStr      = "0x6a000f20005980200259b80c5102003040001068"
 )
 
 func BuildCallLocalReth(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashbots_client.Bundle, *big.Int, *big.Int, error) {
@@ -64,7 +60,16 @@ func BuildCallLocalReth(ctx context.Context, logger *slog.Logger, dataIn DataIn)
 		return nil, nil, nil, errors.Join(errors.New("failed to get current nonce"), err)
 	}
 
-	txs, err := generateAndBuildDistributeCalls(nonce, dataIn.MinipoolAddresses, baseGasBoosted, tipGas, logger, dataIn.Command)
+	txs, err := generateAndBuildDistributeCalls(
+		dataIn.NetworkId,
+		nonce,
+		dataIn.MinipoolAddresses,
+		baseGasBoosted,
+		tipGas,
+		logger,
+		dataIn.Command,
+		dataIn.NodeAddressPrivateKey,
+	)
 	if err != nil {
 		return nil, nil, nil, errors.Join(errors.New("failed to generate distribute calls"), err)
 	}
@@ -74,14 +79,24 @@ func BuildCallLocalReth(ctx context.Context, logger *slog.Logger, dataIn DataIn)
 		return nil, nil, nil, errors.Join(errors.New("failed to calculate distributed balance"), err)
 	}
 
+	rEthContractAddress, err := GetREthContractAddress(dataIn.NetworkId)
+	if err != nil {
+		return nil, nil, nil, errors.Join(errors.New("failed to get rETH contract address"), err)
+	}
+
+	rethInstance, err := rETH.NewRETH(rEthContractAddress, dataIn.Client)
+	if err != nil {
+		return nil, nil, nil, errors.Join(errors.New("failed to create rETH instance"), err)
+	}
+
 	if dataIn.DryRun {
 		fmt.Println(string(colorRed), "If you want to use tenderly to simulate the arbitrage, you need to overwrite the state for the final transaction:")
-		fmt.Printf("    - Set the ETH balance of the rETH contract (%s) to %s\n", rEthContractAddressStr, rETHShare.String())
+		fmt.Printf("    - Set the ETH balance of the rETH contract (%s) to %s\n", rEthContractAddress.Hex(), rETHShare.String())
 		fmt.Println(string(colorReset))
 	}
 
 	// calcaulte amount rETH to burn
-	rethToBurn, err := ConvertWethToReth(ctx, dataIn.RETHInstance, rETHShare)
+	rethToBurn, err := ConvertWethToReth(ctx, rethInstance, rETHShare)
 	if err != nil {
 		return nil, nil, nil, errors.Join(errors.New("failed to convert rETH to WETH"), err)
 	}
@@ -89,12 +104,12 @@ func BuildCallLocalReth(ctx context.Context, logger *slog.Logger, dataIn DataIn)
 	logger.Debug("calculated rETH to burn", slog.String("rethToBurn", rethToBurn.String()))
 
 	nextNonce := nonce + uint64(len(txs))
-	rawBurnTx, err := generateBurnCall(nextNonce, rethToBurn, baseGasBoosted, tipGas)
+	rawBurnTx, err := generateBurnCall(rEthContractAddress, dataIn.NetworkId, nextNonce, rethToBurn, baseGasBoosted, tipGas)
 	if err != nil {
 		return nil, nil, nil, errors.Join(errors.New("failed to generate burn call"), err)
 	}
 
-	signedBurnTx, err := signTransaction(logger, dataIn.Command, rawBurnTx)
+	signedBurnTx, err := signTransaction(logger, dataIn.Command, dataIn.NodeAddressPrivateKey, rawBurnTx)
 	if err != nil {
 		return nil, nil, nil, errors.Join(errors.New("failed to sign burn tx"), err)
 	}
@@ -131,7 +146,16 @@ func BuildCall(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashb
 		return nil, nil, errors.Join(errors.New("failed to get current nonce"), err)
 	}
 
-	txs, err := generateAndBuildDistributeCalls(nonce, dataIn.MinipoolAddresses, baseGasBoosted, tipGas, logger, dataIn.Command)
+	txs, err := generateAndBuildDistributeCalls(
+		dataIn.NetworkId,
+		nonce,
+		dataIn.MinipoolAddresses,
+		baseGasBoosted,
+		tipGas,
+		logger,
+		dataIn.Command,
+		dataIn.NodeAddressPrivateKey,
+	)
 	if err != nil {
 		return nil, nil, errors.Join(errors.New("failed to generate distribute calls"), err)
 	}
@@ -142,7 +166,7 @@ func BuildCall(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashb
 		dataIn.Client,
 		dataIn.NodeAddress,
 		dataIn.MinipoolAddresses,
-		dataIn.RETHInstance,
+		dataIn.NetworkId,
 		dataIn.DryRun,
 		dataIn.Protocol,
 	)
@@ -164,7 +188,6 @@ func BuildCall(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashb
 		paraswapData.expectedFee = disributeFee + ARBITRAGE_PARASWAP_CALL_MAX_GAS
 		paraswapData.expectedProfitAfterFees = new(big.Int).Sub(paraswapData.expectedProfit, big.NewInt(int64(paraswapData.expectedFee)))
 	}
-		
 
 	uniswapIsBetter := uniswapData.expectedProfitAfterFees.Cmp(paraswapData.expectedProfitAfterFees) >= 0
 
@@ -206,6 +229,11 @@ func BuildCall(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashb
 		fmt.Println() // newline
 	}
 
+	arbitrageContractAddress, err := GetArbitrageContractAddress(dataIn.NetworkId)
+	if err != nil {
+		return nil, nil, errors.Join(errors.New("failed to get arbitrage contract address"), err)
+	}
+
 	var expectedProfit *big.Int
 	nextNonce := nonce + uint64(len(txs))
 	logger.Debug("signed distribute txs", slog.Int("count", len(txs)))
@@ -214,11 +242,8 @@ func BuildCall(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashb
 
 		var minProfit *big.Int
 		if dataIn.CheckProfit {
-			// add 75% of the profit to the min profit
-			minProfit = new(big.Int).Add(
-				big.NewInt(int64(uniswapData.expectedFee)),
-				new(big.Int).Div(new(big.Int).Mul(uniswapData.expectedProfit, big.NewInt(75)), big.NewInt(100)),
-			)
+			// add 95% of the profit to the min profit
+			minProfit = new(big.Int).Div(new(big.Int).Mul(expectedProfit, big.NewInt(95)), big.NewInt(100))
 		} else {
 			if logger.Enabled(ctx, slog.LevelInfo) {
 				fmt.Println("Ignoring distribute cost, will distribute regardless of profit.")
@@ -231,12 +256,21 @@ func BuildCall(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashb
 			logger.Debug("calculated min profit", slog.Float64("minProfit", minProfitFloat))
 		}
 
-		rawArbitrageTx, err := generateArbitrageCall(nextNonce, uniswapData, minProfit, baseGasBoosted, tipGas, *dataIn.ReceiverAddress)
+		rawArbitrageTx, err := generateArbitrageCall(
+			dataIn.NetworkId,
+			nextNonce,
+			uniswapData,
+			minProfit,
+			baseGasBoosted,
+			tipGas,
+			arbitrageContractAddress,
+			*dataIn.ReceiverAddress,
+		)
 		if err != nil {
 			return nil, nil, errors.Join(errors.New("failed to generate arbitrage call"), err)
 		}
 
-		signedArbitrageTx, err := signTransaction(logger, dataIn.Command, rawArbitrageTx)
+		signedArbitrageTx, err := signTransaction(logger, dataIn.Command, dataIn.NodeAddressPrivateKey, rawArbitrageTx)
 		if err != nil {
 			return nil, nil, errors.Join(errors.New("failed to sign arbitrage tx"), err)
 		}
@@ -248,11 +282,8 @@ func BuildCall(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashb
 
 		var minProfit *big.Int
 		if dataIn.CheckProfit {
-			// add 75% of the profit to the min profit
-			minProfit = new(big.Int).Add(
-				big.NewInt(int64(paraswapData.expectedFee)),
-				new(big.Int).Div(new(big.Int).Mul(paraswapData.expectedProfit, big.NewInt(75)), big.NewInt(100)),
-			)
+			// add 95% of the profit to the min profit
+			minProfit = new(big.Int).Div(new(big.Int).Mul(expectedProfit, big.NewInt(95)), big.NewInt(100))
 		} else {
 			if logger.Enabled(ctx, slog.LevelInfo) {
 				fmt.Println("Ignoring distribute cost, will distribute regardless of profit.")
@@ -265,12 +296,21 @@ func BuildCall(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashb
 			logger.Debug("calculated min profit", slog.Float64("minProfit", minProfitFloat))
 		}
 
-		rawArbitrageTx, err := generateParaswapArbitrageCall(nextNonce, paraswapData, minProfit, baseGasBoosted, tipGas, *dataIn.ReceiverAddress)
+		rawArbitrageTx, err := generateParaswapArbitrageCall(
+			dataIn.NetworkId,
+			nextNonce,
+			paraswapData,
+			minProfit,
+			baseGasBoosted,
+			tipGas,
+			arbitrageContractAddress,
+			*dataIn.ReceiverAddress,
+		)
 		if err != nil {
 			return nil, nil, errors.Join(errors.New("failed to generate paraswap call"), err)
 		}
 
-		signedParaswapTx, err := signTransaction(logger, dataIn.Command, rawArbitrageTx)
+		signedParaswapTx, err := signTransaction(logger, dataIn.Command, dataIn.NodeAddressPrivateKey, rawArbitrageTx)
 		if err != nil {
 			return nil, nil, errors.Join(errors.New("failed to sign paraswap tx"), err)
 		}
@@ -347,10 +387,20 @@ func CalcualteArbitrageData(
 	client *ethclient.Client,
 	senderAddress *common.Address,
 	minipoolAddresses []common.Address,
-	rethInstance *rETH.RETH,
+	networkId uint64,
 	dryRun bool,
 	protocol Protocol,
 ) (*UniswapArbitrage, *ParaswapArbitrage, error) {
+	rEthContractAddress, err := GetREthContractAddress(networkId)
+	if err != nil {
+		return nil, nil, errors.Join(errors.New("failed to get rETH contract address"), err)
+	}
+
+	rethInstance, err := rETH.NewRETH(rEthContractAddress, client)
+	if err != nil {
+		return nil, nil, errors.Join(errors.New("failed to create rETH instance"), err)
+	}
+
 	rETHShare, err := CalcaulteDistributedBalance(ctx, logger, client, minipoolAddresses)
 	if err != nil {
 		return nil, nil, errors.Join(errors.New("failed to calculate distributed balance"), err)
@@ -362,7 +412,7 @@ func CalcualteArbitrageData(
 
 	if dryRun {
 		fmt.Println(string(colorRed), "If you want to use tenderly to simulate the arbitrage, you need to overwrite the state for the final transaction:")
-		fmt.Printf("    - Set the ETH balance of the rETH contract (%s) to %s\n", rEthContractAddressStr, rETHShare.String())
+		fmt.Printf("    - Set the ETH balance of the rETH contract (%s) to %s\n", rEthContractAddress.Hex(), rETHShare.String())
 		fmt.Println(string(colorReset))
 	}
 
@@ -372,10 +422,10 @@ func CalcualteArbitrageData(
 		return nil, nil, errors.Join(errors.New("failed to convert rETH to WETH"), err)
 	}
 
-	logger.Debug("calculated rETH to burn", slog.String("rethToBurn", rethToBurn.String()))	
+	logger.Debug("calculated rETH to burn", slog.String("rethToBurn", rethToBurn.String()))
 
 	// fetch paraswap data
-	dataParaswap, err := fetchParaswapData(ctx, logger, rethToBurn, senderAddress)
+	dataParaswap, err := fetchParaswapData(ctx, logger, rethToBurn, senderAddress, rEthContractAddress, networkId)
 	if err != nil {
 		return nil, nil, errors.Join(errors.New("failed to fetch paraswap data"), err)
 	}
@@ -385,7 +435,7 @@ func CalcualteArbitrageData(
 	primaryRatio := new(big.Float).Quo(new(big.Float).SetInt(rETHShare), new(big.Float).SetInt(rethToBurn))
 
 	// get best pool to swap rETH
-	poolAddress, uniswapReturnAmountWeth, err := uniswap.GetBestPoolWithdrawArb(ctx, logger, client, rethToBurn, primaryRatio)
+	poolAddress, uniswapReturnAmountWeth, sqrtPriceLimitX96, err := uniswap.GetBestPoolWithdrawArb(ctx, logger, client, rethToBurn, primaryRatio)
 	if err != nil {
 		if errors.Is(err, uniswap.ErrPriceLimitExceeded) {
 			if protocol == ParaswapProtocol {
@@ -416,6 +466,7 @@ func CalcualteArbitrageData(
 		poolAddress:       poolAddress,
 		swapInAmountWeth:  uniswapReturnAmountWeth,
 		swapOutAmountReth: rethToBurn,
+		sqrtPriceLimitX96: sqrtPriceLimitX96,
 		expectedProfit:    new(big.Int).Sub(rETHShare, uniswapReturnAmountWeth),
 	}
 
@@ -460,16 +511,23 @@ func getCurrentNonce(ctx context.Context, client *ethclient.Client, address comm
 	return nonce, nil
 }
 
-func generateAndBuildDistributeCalls(nonce uint64, minipoolAddresses []common.Address, baseGas, tipGas *big.Int, logger *slog.Logger, apiCommand string) ([]*types.Transaction, error) {
+func generateAndBuildDistributeCalls(
+	networkId, nonce uint64,
+	minipoolAddresses []common.Address,
+	baseGas, tipGas *big.Int,
+	logger *slog.Logger,
+	apiCommand string,
+	privateKey *ecdsa.PrivateKey,
+) ([]*types.Transaction, error) {
 	var txs []*types.Transaction
 
 	for i, minipoolAddress := range minipoolAddresses {
-		rawTx, err := generateDistributeCall(nonce+uint64(i), minipoolAddress, baseGas, tipGas)
+		rawTx, err := generateDistributeCall(networkId, nonce+uint64(i), minipoolAddress, baseGas, tipGas)
 		if err != nil {
 			return nil, errors.Join(errors.New("failed to generate distribute call"), err)
 		}
 
-		signedTx, err := signTransaction(logger, apiCommand, rawTx)
+		signedTx, err := signTransaction(logger, apiCommand, privateKey, rawTx)
 		if err != nil {
 			return nil, errors.Join(errors.New("failed to sign distribute tx"), err)
 		}
@@ -480,7 +538,7 @@ func generateAndBuildDistributeCalls(nonce uint64, minipoolAddresses []common.Ad
 	return txs, nil
 }
 
-func generateDistributeCall(nonce uint64, minipoolAddress common.Address, baseGas, tipGas *big.Int) (*types.Transaction, error) {
+func generateDistributeCall(chainId, nonce uint64, minipoolAddress common.Address, baseGas, tipGas *big.Int) (*types.Transaction, error) {
 	minipoolAbi, err := abi.JSON(strings.NewReader(minipoolDelegate.MinipoolDelegateABI))
 	if err != nil {
 		return nil, errors.Join(errors.New("failed to get minipool ABI"), err)
@@ -493,7 +551,7 @@ func generateDistributeCall(nonce uint64, minipoolAddress common.Address, baseGa
 	}
 
 	dynTx := &types.DynamicFeeTx{
-		ChainID:   big.NewInt(1),
+		ChainID:   new(big.Int).SetUint64(chainId),
 		Nonce:     nonce,
 		GasFeeCap: baseGas,
 		GasTipCap: tipGas,
@@ -506,21 +564,26 @@ func generateDistributeCall(nonce uint64, minipoolAddress common.Address, baseGa
 	return types.NewTx(dynTx), nil
 }
 
-func generateArbitrageCall(nonce uint64, uniswapData *UniswapArbitrage, minProfit, baseGas, tipGas *big.Int, receiver common.Address) (*types.Transaction, error) {
+func generateArbitrageCall(chainId, nonce uint64, uniswapData *UniswapArbitrage, minProfit, baseGas, tipGas *big.Int, arbitrageContractAddress, receiver common.Address) (*types.Transaction, error) {
 	arbitrageAbi, err := abi.JSON(strings.NewReader(contract.ContractABI))
 	if err != nil {
 		return nil, errors.Join(errors.New("failed to get arbitrage ABI"), err)
 	}
-
-	callData, err := arbitrageAbi.Pack("arb", uniswapData.poolAddress, uniswapData.swapInAmountWeth, minProfit, receiver)
+	
+	callData, err := arbitrageAbi.Pack(
+		"arb",
+		uniswapData.poolAddress,
+		uniswapData.sqrtPriceLimitX96,
+		uniswapData.swapInAmountWeth,
+		minProfit,
+		receiver,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to pack function data: %v", err)
 	}
 
-	arbitrageContractAddress := common.HexToAddress(arbitrageContractAddressStr)
-
 	dynTx := &types.DynamicFeeTx{
-		ChainID:   big.NewInt(1),
+		ChainID:   new(big.Int).SetUint64(chainId),
 		Nonce:     nonce,
 		GasFeeCap: baseGas,
 		GasTipCap: tipGas,
@@ -533,7 +596,13 @@ func generateArbitrageCall(nonce uint64, uniswapData *UniswapArbitrage, minProfi
 	return types.NewTx(dynTx), nil
 }
 
-func generateParaswapArbitrageCall(nonce uint64, paraswapData *ParaswapArbitrage, minProfit, baseGas, tipGas *big.Int, receiver common.Address) (*types.Transaction, error) {
+func generateParaswapArbitrageCall(
+	chainId, nonce uint64,
+	paraswapData *ParaswapArbitrage,
+	minProfit, baseGas, tipGas *big.Int,
+	arbitrageContractAddress,
+	receiver common.Address,
+) (*types.Transaction, error) {
 	arbitrageAbi, err := abi.JSON(strings.NewReader(contract.ContractABI))
 	if err != nil {
 		return nil, errors.Join(errors.New("failed to get arbitrage ABI"), err)
@@ -550,10 +619,8 @@ func generateParaswapArbitrageCall(nonce uint64, paraswapData *ParaswapArbitrage
 		return nil, fmt.Errorf("failed to pack function data: %v", err)
 	}
 
-	arbitrageContractAddress := common.HexToAddress(arbitrageContractAddressStr)
-
 	dynTx := &types.DynamicFeeTx{
-		ChainID:   big.NewInt(1),
+		ChainID:   new(big.Int).SetUint64(chainId),
 		Nonce:     nonce,
 		GasFeeCap: baseGas,
 		GasTipCap: tipGas,
@@ -566,7 +633,7 @@ func generateParaswapArbitrageCall(nonce uint64, paraswapData *ParaswapArbitrage
 	return types.NewTx(dynTx), nil
 }
 
-func generateBurnCall(nonce uint64, rethToBurn, baseGas, tipGas *big.Int) (*types.Transaction, error) {
+func generateBurnCall(rethContractAddress common.Address, chainId, nonce uint64, rethToBurn, baseGas, tipGas *big.Int) (*types.Transaction, error) {
 	rEthAbi, err := abi.JSON(strings.NewReader(rETH.RETHABI))
 	if err != nil {
 		return nil, errors.Join(errors.New("failed to get arbitrage ABI"), err)
@@ -577,10 +644,8 @@ func generateBurnCall(nonce uint64, rethToBurn, baseGas, tipGas *big.Int) (*type
 		return nil, fmt.Errorf("failed to pack function data: %v", err)
 	}
 
-	rethContractAddress := common.HexToAddress(rEthContractAddressStr)
-
 	dynTx := &types.DynamicFeeTx{
-		ChainID:   big.NewInt(1),
+		ChainID:   new(big.Int).SetUint64(chainId),
 		Nonce:     nonce,
 		GasFeeCap: baseGas,
 		GasTipCap: tipGas,
@@ -593,7 +658,24 @@ func generateBurnCall(nonce uint64, rethToBurn, baseGas, tipGas *big.Int) (*type
 	return types.NewTx(dynTx), nil
 }
 
-func signTransaction(logger *slog.Logger, apiCommand string, tx *types.Transaction) (*types.Transaction, error) {
+func signTransaction(logger *slog.Logger, apiCommand string, privateKey *ecdsa.PrivateKey, tx *types.Transaction) (signedTx *types.Transaction, err error) {
+	if privateKey != nil {
+		signedTx, err = types.SignTx(tx, types.LatestSignerForChainID(tx.ChainId()), privateKey)
+		if err != nil {
+			return nil, errors.Join(errors.New("failed to sign tx using private key"), err)
+		}
+	} else if apiCommand != "" {
+		signedTx, err = useSmartnodeDaemon(logger, apiCommand, tx)
+		if err != nil {
+			return nil, errors.Join(errors.New("failed to sign tx using smartnode daemon"), err)
+		}
+	} else {
+		return nil, errors.New("no signing method provided")
+	}
+	return signedTx, nil
+}
+
+func useSmartnodeDaemon(logger *slog.Logger, apiCommand string, tx *types.Transaction) (*types.Transaction, error) {
 	serializedTx, err := tx.MarshalBinary()
 	if err != nil {
 		return nil, errors.Join(errors.New("failed to serialize tx"), err)
@@ -638,12 +720,28 @@ func signTransaction(logger *slog.Logger, apiCommand string, tx *types.Transacti
 	return &signedTx, nil
 }
 
-func fetchParaswapData(ctx context.Context, logger *slog.Logger, amount *big.Int, senderAddress *common.Address) (*ParaswapArbitrage, error) {
-	urlPrices := fmt.Sprintf("https://api.paraswap.io/prices?network=1&version=6.2&slippage=50&srcToken=%s&srcDecimals=18&destToken=%s&destDecimals=18&amount=%s&side=BUY&userAddress=%s",
-		WETHContractAddressStr,
-		rEthContractAddressStr,
+func fetchParaswapData(ctx context.Context, logger *slog.Logger, amount *big.Int, senderAddress *common.Address, rEthContractAddress common.Address, networkId uint64) (*ParaswapArbitrage, error) {
+	WETHContractAddress, err := GetWETHContractAddress(networkId)
+	if err != nil {
+		return nil, errors.Join(errors.New("failed to get WETH contract address"), err)
+	}
+
+	arbitrageContractAddress, err := GetArbitrageContractAddress(networkId)
+	if err != nil {
+		return nil, errors.Join(errors.New("failed to get arbitrage contract address"), err)
+	}
+
+	ParaswapV6_2Address, err := GetParaswapV6_2Address(networkId)
+	if err != nil {
+		return nil, errors.Join(errors.New("failed to get paraswap v6.2 address"), err)
+	}
+
+	urlPrices := fmt.Sprintf("https://api.paraswap.io/prices?network=%d&version=6.2&slippage=50&srcToken=%s&srcDecimals=18&destToken=%s&destDecimals=18&amount=%s&side=BUY&userAddress=%s",
+		networkId,
+		WETHContractAddress.Hex(),
+		rEthContractAddress.Hex(),
 		amount.String(),
-		arbitrageContractAddressStr,
+		arbitrageContractAddress.Hex(),
 	)
 
 	reqPrices, err := http.NewRequest("GET", urlPrices, nil)
@@ -711,7 +809,10 @@ func fetchParaswapData(ctx context.Context, logger *slog.Logger, amount *big.Int
 		return nil, errors.New("priceRoute field not found in bodyPrices")
 	}
 
-	urlTransaction := "https://api.paraswap.io/transactions/1?onlyParams=true&ignoreChecks=true&ignoreGasEstimate=true"
+	urlTransaction := fmt.Sprintf(
+		"https://api.paraswap.io/transactions/%d?onlyParams=true&ignoreChecks=true&ignoreGasEstimate=true",
+		networkId,
+	)
 
 	transactionsBody := ParaswapTransactionsBody{
 		SrcToken:     prices.PriceRoute.SrcToken,
@@ -722,7 +823,7 @@ func fetchParaswapData(ctx context.Context, logger *slog.Logger, amount *big.Int
 		DestAmount:   prices.PriceRoute.DestAmount,
 		PriceRoute:   innerPriceRoute,
 		TxOrigin:     senderAddress.String(),
-		UserAddress:  arbitrageContractAddressStr,
+		UserAddress:  arbitrageContractAddress.Hex(),
 	}
 
 	transactionsBodyJSON, err := json.Marshal(transactionsBody)
@@ -765,12 +866,12 @@ func fetchParaswapData(ctx context.Context, logger *slog.Logger, amount *big.Int
 
 	logger.Debug("fetched paraswap transaction data")
 
-	if !strings.EqualFold(ParaswapV6_2AddressStr, transactionsResponse.To) {
-		return nil, fmt.Errorf("invalid paraswap router address: %s, expected: %s", transactionsResponse.To, ParaswapV6_2AddressStr)
+	if ParaswapV6_2Address.Cmp(common.HexToAddress(transactionsResponse.To)) != 0 {
+		return nil, fmt.Errorf("invalid paraswap router address: %s, expected: %s", transactionsResponse.To, ParaswapV6_2Address.Hex())
 	}
 
-	if !strings.EqualFold(arbitrageContractAddressStr, transactionsResponse.From) {
-		return nil, fmt.Errorf("invalid paraswap from address: %s, expected: %s (arbitrage contract)", transactionsResponse.From, arbitrageContractAddressStr)
+	if arbitrageContractAddress.Cmp(common.HexToAddress(transactionsResponse.From)) != 0 {
+		return nil, fmt.Errorf("invalid paraswap from address: %s, expected: %s (arbitrage contract)", transactionsResponse.From, arbitrageContractAddress.Hex())
 	}
 
 	if transactionsResponse.Value != "0" {
