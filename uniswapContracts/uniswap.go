@@ -30,19 +30,19 @@ var (
 	UniswapQ96 = new(big.Float).SetInt(new(big.Int).Lsh(big.NewInt(1), 96))
 )
 
-func GetBestPoolWithdrawArb(ctx context.Context, logger *slog.Logger, client *ethclient.Client, amount *big.Int, primaryRatio *big.Float) (common.Address, *big.Int, error) {
+func GetBestPoolWithdrawArb(ctx context.Context, logger *slog.Logger, client *ethclient.Client, amount *big.Int, primaryRatio *big.Float) (common.Address, *big.Int, *big.Int, error) {
 	// withdraw swaps => zeroForOne = false
 	return GetBestPool(ctx, logger, client, false, amount, primaryRatio)
 }
 
-func GetBestPool(ctx context.Context, logger *slog.Logger, client *ethclient.Client, zeroForOne bool, amount *big.Int, primaryRatio *big.Float) (common.Address, *big.Int, error) {
+func GetBestPool(ctx context.Context, logger *slog.Logger, client *ethclient.Client, zeroForOne bool, amount *big.Int, primaryRatio *big.Float) (common.Address, *big.Int, *big.Int, error) {
 	// afaik there is no good uniswap deployment on holesky
 	networkID, err := client.NetworkID(ctx)
 	if err != nil {
-		return common.Address{}, nil, errors.Join(errors.New("failed to verify client connection"), err)
+		return common.Address{}, nil, nil, errors.Join(errors.New("failed to verify client connection"), err)
 	}
 	if networkID.Uint64() != 1 {
-		return common.Address{}, nil, errors.New("only mainnet is supported for uniswap arbitrage")
+		return common.Address{}, nil, nil, errors.New("only mainnet is supported for uniswap arbitrage")
 	}
 
 	var limit *big.Int
@@ -56,7 +56,7 @@ func GetBestPool(ctx context.Context, logger *slog.Logger, client *ethclient.Cli
 
 	poolAAmountIn, err := getExactOutput(ctx, client, zeroForOne, amount, big.NewInt(100), limit)
 	if err != nil {
-		return common.Address{}, nil, errors.Join(errors.New("failed to get pool A"), err)
+		return common.Address{}, nil, nil, errors.Join(errors.New("failed to get pool A"), err)
 	}
 
 	if logger != nil && logger.Enabled(ctx, slog.LevelDebug) {
@@ -70,7 +70,7 @@ func GetBestPool(ctx context.Context, logger *slog.Logger, client *ethclient.Cli
 		// if we get an error this is probably cause by the low liquidity
 		// therefor we only log it as a warning and default back to pool A
 		logger.Debug("failed to get uniswap estimation - possible too low liquidty", slog.String("pool", PoolB))
-		return common.HexToAddress(PoolA), poolAAmountIn, nil
+		return common.HexToAddress(PoolA), poolAAmountIn, limit, nil
 	}
 
 	if logger != nil && logger.Enabled(ctx, slog.LevelDebug) {
@@ -80,9 +80,9 @@ func GetBestPool(ctx context.Context, logger *slog.Logger, client *ethclient.Cli
 
 	// return pool with lowest amount in
 	if poolAAmountIn.Cmp(poolBAmountIn) < 0 {
-		return common.HexToAddress(PoolA), poolAAmountIn, nil
+		return common.HexToAddress(PoolA), poolAAmountIn, limit, nil
 	} else {
-		return common.HexToAddress(PoolB), poolBAmountIn, nil
+		return common.HexToAddress(PoolB), poolBAmountIn, limit, nil
 	}
 }
 
