@@ -16,7 +16,9 @@ When **exiting minipools** or **claiming ETH**, it is vital to check for arbitra
 
 The core objective is to leverage **distribute** calls in combination with **rETH burn** to capture potential arbitrage gains. This tool can also facilitate a **flashloan** for users who don't already hold rETH but want to capitalize on the arbitrage.
 
- you prefer not to run this CLI tool on your validator machine alongside the smartnode daemon—or if you don't have access to the smartnode (for example, when using a service like [Allnodes](https://www.allnodes.com/)) — you can use the `--rpc=...` flag and provide your node operator private key via `--node-private-key`. You can also use your Withdrawal Address instead, depending on what best suits your situation.
+If you prefer not to run this CLI tool on your validator machine alongside the smartnode daemon—or if you don't have access to the smartnode (for example, when using a service like [Allnodes](https://www.allnodes.com/)) — you can use the `--rpc=...` flag and provide your node operator private key via `--node-private-key`. You can also use your Withdrawal Address instead, depending on what best suits your situation.
+
+If you encounter any issues while using the tool, please open a GitHub issue so we can investigate and address it.
 
 
 ### Why This Tool?
