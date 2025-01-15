@@ -3,7 +3,7 @@
 > **WARNING**  
 > This software is an **initial version** and **has not been thoroughly tested**.  
 > Use at your own risk. No guarantees are provided, and we assume no liability for any potential losses or damages resulting from its use.
-> The flashloan functionality has been tested a few times, and there is some level of confidence in its performance (e.g., [example transaction](https://etherscan.io/tx/0x6477ef386a2d639d83d318294f4ade78d46f5e8be41846e5a9912c56e824c31f)).
+> The flashloan functionality has been tested and there is reasonable level of confidence in its performance (e.g. [Uniswap](https://etherscan.io/tx/0x2b047ce03e8323b1f622de3c6ce9136b4b4b13321e01b324d360786eaba392e4) or [Paraswap](https://etherscan.io/tx/0x57923f69bd0b33648ef650b39c4e64fcbc0569a5e52ea5aad2cba8a7a85b3e79)). The rETH burn bundle was tested on holesky (e.g. [burn](https://holesky.etherscan.io/tx/0x7bc144b4e2014c815f5f77d23385a52c178e1e354326f04c8a5e396555a3b984)).
 > Always review the code and run your own tests before using it in a production environment.
 
 ---
@@ -14,15 +14,17 @@ This repository contains a CLI (Command-Line Interface) tool designed to help **
 Whenever you call **distribute** on a pool, it sends the Rocket Pool share to the rETH contract, allowing more rETH to be burned in exchange for ETH.  
 When **exiting minipools** or **claiming ETH**, it is vital to check for arbitrage opportunities that would otherwise be captured by third parties.
 
-
 The core objective is to leverage **distribute** calls in combination with **rETH burn** to capture potential arbitrage gains. This tool can also facilitate a **flashloan** for users who don't already hold rETH but want to capitalize on the arbitrage.
+
+ you prefer not to run this CLI tool on your validator machine alongside the smartnode daemon—or if you don't have access to the smartnode (for example, when using a service like [Allnodes](https://www.allnodes.com/)) — you can use the `--rpc=...` flag and provide your node operator private key via `--node-private-key`. You can also use your Withdrawal Address instead, depending on what best suits your situation.
+
 
 ### Why This Tool?
 
 - **Scenario 1**:  
   If you already hold rETH, you can bundle the **distribute** action with an **rETH burn** to recive ETH at the protocol rate.
 - **Scenario 2**:  
-  If you don’t hold rETH, you can use a **flashloan** to obtain rETH, perform the distribute and burn, then repay the loan—collecting any remaining ETH as profit.
+  If you don't hold rETH, you can use a **flashloan** to obtain rETH, perform the distribute and burn, then repay the loan—collecting any remaining ETH as profit.
 
 ---
 
@@ -36,19 +38,15 @@ The core objective is to leverage **distribute** calls in combination with **rET
 6. [Usage](#usage)  
    - [Scenario 1: If You Already Have rETH](#scenario-1-if-you-already-have-reth)  
    - [Scenario 2: Flashloan Approach](#scenario-2-flashloan-approach)  
-7. [Configuration](#configuration)  
-8. [Stretch Goals / Future Enhancements](#stretch-goals--future-enhancements)  
-9. [License](#license)
+7. [Configuration](#configuration)
+8. [License](#license)
 
 ---
 
 ## Known Issues & Limitations
 
 - **Profit Checks with Multiple Pools**  
-  When operating with low discounts and a large number of pools using the `--minipools` flag, the tool does not perform individual profit checks for each pool. This can lead to suboptimal profits across multiple pools. It is recommended to limit the number of pools in a single call to ensure better profitability at times of low discount. The tool will only work with paraswap for larger amounts.
-
-- **Lack of Comprehensive Tests**  
-  This initial version lacks thorough testing, especially for the local rETH functionality. Testing for the local rETH integration is planned and will be completed in the coming days to enhance reliability and stability.
+  When using Paraswap with low discounts and a high number of pools (via the `--minipools` flag), the tool does not perform individual profit checks for each pool. As a result, if the secondary rate crosses the primary rate, you may experience suboptimal profits. To maintain better profitability when discounts are low, it is advisable to limit the number of pools in a single call. Alternatively, you can use a Uniswap flash swap (`--protocol=uniswap`), but this approach is generally recommended only for smaller amounts—for example, exiting a single pool with 24 ETH.
 
 ---
 
@@ -116,7 +114,7 @@ For this initial version, **no binaries are provided**. You will need to **insta
 
 ## How to simulate
 
-You can use the `--dry-run` option to generate an example bundle without executing it. This option also displays the individual transactions involved. These transactions can be simulated using tools like [Tenderly](tenderly.co). 
+You can use the `--dry-run` option to generate an example bundle without executing it. This option also displays the individual transactions involved. If you are using this tool to burn rETH, the transactions will always be printed. As that action is not time sensitive, take your time to confirm the transactions. They can be simulated using tools like [Tenderly](tenderly.co). 
 Since the transactions are sent as part of an MEV bundle, their execution depends on the state resulting from the previous transactions. Therefore, it is essential to update the chain state while simulating. Our primary focus is on the final transaction, as it executes the arbitrage.
 Below is an example of the `dry-run` option:
 ```
@@ -178,14 +176,27 @@ Next, configure the state overwrite. Expand the `State Overrides` option on the 
 Now you can simulate the transaction. Focus on observing the `State` changes. Key things to verify include:
 - The balance change in the receiver's address.
 - Ensuring the `rETH` contract balance remains mostly unchanged.
+- If burning local rETH: Make sure the correct amount is burned and the ETH is send to the correct address.
 
-Additionally, you could review the emitted events. Look for the `Arbitrage` event, which displays details such as the `receiver` and the `profit` (before fees). 
+Additionally, you could review the emitted events. When executing an arbitrage: Look for the `Arbitrage` event, which displays details such as the `receiver` and the `profit` (before fees).
 
 ---
 
 ## Usage
 
 ### Scenario 1: If You Already Have rETH
+
+In this scenario, you already possess rETH and aim to burn it at the protocol rate. The CLI tool facilitates the process by bundling the **distribute** action with an **rETH burn**. You can select this scenario with the `--local-reth` flag. When using smartnode with the default docker configuration, you usually only need to add the address (`--minipool` or `--minipools`). If you modifyed the default port, use the  `--rpc-port` flag to set the new port. If you have an external eth1 client, use the `--rpc` flag.
+
+Because no secondary markets are involved, **this scenario is not time-sensitive**. Therefore, it is **highly recommended** to use external tools to simulate the displayed transactions and confirm they perform as intended.
+
+The workflow proceeds as follows:
+
+**1. Confirmation:** Once all calculations are complete, you will be prompted to confirm whether to proceed. This step allows you to verify that the ratios and amounts are accurate and meet your expectations.
+
+**2. Submission:** After confirmation, the bundle is sent to multiple relays and remains valid for inclusion in the next five blocks.
+
+**3. Inclusion Monitoring:** The script then monitors the network, waiting for the transactions within the bundle to be included in a block.
 
 ### Scenario 2: Flashloan Approach
 
@@ -236,7 +247,6 @@ Do you want to proceed? (y/n): y
 Sent bundle with hash: 0xb..8. Waiting for up to one minute to see if the transaction is included...
 
 Distributed minipool! Arbitrage tx: https://etherscan.io/tx/0x6477ef386a2d639d83d318294f4ade78d46f5e8be41846e5a9912c56e824c31f
-
 ```
 
 ---
@@ -386,7 +396,7 @@ This CLI tool is configured primarily through command-line flags. Below is a lis
 - **Flag**: `--node-private-key`
     **Type**: string
     **Default**: (empty)
-    **Description**: Specifies the private key for the node address used as the caller. This can be used if the script should not use the Rocket Pool daemon to sign transactions. For example, when using external services like Allnode.
+    **Description**: Specifies the private key for the node address used as the caller. This can be used if the script should not use the Rocket Pool daemon to sign transactions. For example, when using external services like Allnodes.
     **Example**:
     ```bash
     ./distribute --node-private-key="your_private_key"
@@ -522,20 +532,6 @@ You can combine multiple flags in a single command. For example:
 ```
 
 This example enables debug logs, uses local rETH and specifies multiple minipools.
-
----
-
-## Stretch Goals / Future Enhancements
-
-Future enhancements aim to improve the tool's functionality, efficiency, and reliability:
-
-- **Individual Profit Checks for Multiple Pools:** When operating with low discounts and a high number of pools using the `--minipools` flag, individual profit checks for each pool are not performed, potentially leading to suboptimal profits. Implementing individual profit checks will ensure better profitability when managing multiple pools. As this feature is only needed for low discount situations, it is currently skipped (at the time of writing, there is a -0.4% discount).
-
-- **Comprehensive Testing:** The initial version lacks thorough testing, particularly for the local rETH functionality. Extensive testing for the local rETH integration is scheduled to be completed in the near future. New minipools have been started on Holesky for testing, which is the main bottleneck for these tests.
-
-- **Enhanced Arbitrage Checks:** Introducing a current arbitrage check feature will calculate the existing discount ratio and determine the potential profit from either exiting the position or distributing funds. This will provide users with better insights and decision-making capabilities regarding their arbitrage strategies.
-
-These improvements are designed to address current limitations and provide a more robust and efficient user experience in upcoming releases.
 
 ---
 
