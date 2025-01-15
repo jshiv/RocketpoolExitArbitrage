@@ -89,11 +89,10 @@ func BuildCallLocalReth(ctx context.Context, logger *slog.Logger, dataIn DataIn)
 		return nil, nil, nil, errors.Join(errors.New("failed to create rETH instance"), err)
 	}
 
-	if dataIn.DryRun {
-		fmt.Println(string(colorRed), "If you want to use tenderly to simulate the arbitrage, you need to overwrite the state for the final transaction:")
-		fmt.Printf("    - Set the ETH balance of the rETH contract (%s) to %s\n", rEthContractAddress.Hex(), rETHShare.String())
-		fmt.Println(string(colorReset))
-	}
+	// always print the rETH burn overwite message, its recomended to simulate these transactions on tenderly
+	fmt.Println(string(colorRed), "If you want to use tenderly to simulate the arbitrage, you need to overwrite the state for the final transaction:")
+	fmt.Printf("    - Set the ETH balance of the rETH contract (%s) to %s\n", rEthContractAddress.Hex(), rETHShare.String())
+	fmt.Println(string(colorReset))
 
 	// calcaulte amount rETH to burn
 	rethToBurn, err := ConvertWethToReth(ctx, rethInstance, rETHShare)

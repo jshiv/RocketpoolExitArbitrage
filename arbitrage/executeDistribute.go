@@ -136,10 +136,15 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 		}
 	}
 
-	// print dry run and return if requested
-	if dataIn.DryRun {
+	// print txs:
+	// - this will always be printed if the user is using local rETH to allow confirming the burn
+	// - if dry-run is set, this will be printed regardless of the user's choice and the txs will not be sent
+	if dataIn.DryRun || dataIn.LocalReth {
+		if dataIn.DryRun {
+			fmt.Println("Dry run. Would have sent the following bundle:")
+		}
+
 		txs := bundle.Transactions()
-		fmt.Println("Dry run. Would have sent the following bundle:")
 		for i, tx := range txs {
 			baseGwei, _ := new(big.Float).Quo(new(big.Float).SetInt(tx.GasFeeCap()), new(big.Float).SetInt(big.NewInt(1e9))).Float64()
 			tipGwei, _ := new(big.Float).Quo(new(big.Float).SetInt(tx.GasTipCap()), new(big.Float).SetInt(big.NewInt(1e9))).Float64()
@@ -154,7 +159,11 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 			fmt.Printf("    Nonce: %d\n", tx.Nonce())
 			fmt.Printf("    Data: %s\n", hex.EncodeToString(tx.Data()))
 		}
-		return nil
+
+		// only return if dry-run is set
+		if dataIn.DryRun {
+			return nil
+		}
 	}
 
 	// end the attempt if the simulation failed - after printing the dryrun if it was requested!
@@ -174,7 +183,7 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 	}
 
 	// ask for user confirmation
-	if !dataIn.SkipConfirmation && !waitForUserConfirmation() {
+	if !dataIn.SkipConfirmation && !waitForUserConfirmation(dataIn.LocalReth) {
 		return errors.New("user did not confirm to proceed")
 	}
 
@@ -190,7 +199,7 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 
 	fmt.Printf("\nSent bundle with hash: %s. Waiting for up to one minute to see if the transaction is included...\n\n", res.BundleHash)
 
-	timeoutContext, cancel := context.WithTimeout(ctx, time.Second*60)
+	timeoutContext, cancel := context.WithTimeout(ctx, time.Second*70)
 	successfullyIncluded, err := dataIn.FbClient.SendNBundleAndWait(timeoutContext, bundle, 4)
 	cancel()
 	if err != nil {
@@ -198,7 +207,10 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 	}
 
 	if !successfullyIncluded {
-		return errors.New("bundle was not included in the mempool")
+		fmt.Println(string(colorRed), "Error: Bundle was not included in the mempool.", string(colorReset))
+		fmt.Println("This can happen at times of high activity. Please try again later.")
+		fmt.Println("If the issue keeps happening, consider raising a github issue.")
+		return nil
 	}
 
 	// print successful inclusion and tx link
@@ -235,7 +247,15 @@ func evalGasPrices(bundle *flashbots_client.Bundle) (bundleGasPrice, arbitrageGa
 	return bundleGasPrice, arbTx.Cost()
 }
 
-func waitForUserConfirmation() bool {
+func waitForUserConfirmation(isUsingLocalReth bool) bool {
+	if isUsingLocalReth {
+		fmt.Println(string(colorRed), "\nSince you're using your own rETH, this transaction is NOT time-sensitive.")
+		fmt.Println("Feel free to review and confirm the transactions above at your own pace. For instance by using Tenderly.")
+		fmt.Println("For detailed instructions on how to simulate these transactions, visit:")
+		fmt.Println("https://github.com/0xtrooper/RocketpoolExitArbitrage?tab=readme#how-to-simulate")
+		fmt.Println(string(colorReset))
+	}
+
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Print("Do you want to proceed? (y/n): ")
 	response, err := reader.ReadString('\n')
@@ -250,7 +270,7 @@ func waitForUserConfirmation() bool {
 		return false
 	default:
 		fmt.Println("Invalid input. Please type 'y' or 'n'.")
-		return waitForUserConfirmation()
+		return waitForUserConfirmation(isUsingLocalReth)
 	}
 }
 
