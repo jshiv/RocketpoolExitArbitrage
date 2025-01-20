@@ -38,8 +38,10 @@ If you encounter any issues while using the tool, please open a GitHub issue so 
 4. [Installation](#installation)  
 5. [How to simulate](#how-to-simulate)
 6. [Usage](#usage)  
-   - [Scenario 1: If You Already Have rETH](#scenario-1-if-you-already-have-reth)  
-   - [Scenario 2: Flashloan Approach](#scenario-2-flashloan-approach)  
+    - [Scenario 1: If You Already Have rETH](#scenario-1-if-you-already-have-reth)  
+    - [Scenario 2: Flashloan Approach](#scenario-2-flashloan-approach) 
+    - [Running the CLI tool on an external machine](#CLI-tool-on-external-machine)
+    - [Allnodes users](#allnodes-users)
 7. [Configuration](#configuration)
 8. [License](#license)
 
@@ -253,9 +255,9 @@ Distributed minipool! Arbitrage tx: https://etherscan.io/tx/0x6477ef386a2d639d83
 
 ---
 
-## Running the CLI tool on an external machine
+### Running the CLI tool on an external machine
 
-If you prefer not to run the CLI tool on your validator machine or if you are an Allnodes user, you can execute the tool on an external machine. Follow these steps:
+If you prefer not to run the CLI tool on your validator machine, you can execute the tool on an external machine. Follow these steps:
 
 1. **Set Up the External Machine**:
     - Ensure that the external machine meets the [requirements](#requirements) listed above, including having Go installed and access to a Web3 provider. This can be the smartnode client; make sure the eth1 config is set accordingly. 
@@ -272,36 +274,17 @@ If you prefer not to run the CLI tool on your validator machine or if you are an
 
 By following these steps, you can safely run the CLI tool on an external machine, ensuring that your validator machine remains secure and isolated from potential risks associated with running additional software. While the tool has access to the node operator hot wallet, this address should not contain a lot of ETH. Therfor the risk is minimal. 
 
----
+### Allnodes users
 
-## Bundle Status Logging
+- **⚠ SET A SEPARATE WITHDRAWAL ADDRESS ⚠**
+	- Do **_not_** use this tool if your node address is the same as your withdrawal address.
+	- To set a withdrawal address, follow the red and green arrow in the screenshot. A hardware wallet is strongly recommended for your withdrawal address.
+- To exit each desired minipool, follow the red and blue arrows in the screenshot.
+- Refer to your wallet's documentation for how to export the private key for your node wallet. If this is a hardware wallet, note that this key is now permanently less secure as it touched an internet-attached computer. This is acceptable for a node wallet, but not a withdrawal wallet.
+	- **_DO NOT export the private key for your withdrawal wallet_**
+- You can then use the tool following instruction for an [Running the CLI tool on an external machine](#CLI-tool-on-external-machine)
 
-When using the `--debug` option, the tool provides detailed updates about the bundle status. For example, the output could look like this:
-```
-Sent bundle with hash: 0x46...d6. Waiting for up to one minute to see if the transaction is included...
-
-2025/01/08 13:18:40 DEBUG start waiting for bundle inclusion module=distribute module=flashbots_client targetBlock=21580006
-2025/01/08 13:18:41 DEBUG Bundle received and simulated module=distribute module=flashbots_client targetBlock=21580006 receivedAt=2025-01-08T13:18:39.908Z simulatedAt=2025-01-08T13:18:39.914Z
-2025/01/08 13:18:41 DEBUG Bundle considered or sealed by builders module=distribute module=flashbots_client targetBlock=21580006 consideredByBuilders=0 sealedByBuilders=0
-2025/01/08 13:18:42 DEBUG Bundle considered or sealed by builders module=distribute module=flashbots_client targetBlock=21580006 consideredByBuilders=0 sealedByBuilders=0
-2025/01/08 13:18:43 DEBUG Bundle considered or sealed by builders module=distribute module=flashbots_client targetBlock=21580006 consideredByBuilders=0 sealedByBuilders=0
-2025/01/08 13:18:44 DEBUG Bundle considered or sealed by builders module=distribute module=flashbots_client targetBlock=21580006 consideredByBuilders=0 sealedByBuilders=0
-2025/01/08 13:18:45 DEBUG Bundle considered or sealed by builders module=distribute module=flashbots_client targetBlock=21580006 consideredByBuilders=0 sealedByBuilders=0
-2025/01/08 13:18:47 DEBUG Bundle considered or sealed by builders module=distribute module=flashbots_client targetBlock=21580006 consideredByBuilders=0 sealedByBuilders=0
-2025/01/08 13:18:48 DEBUG Bundle considered or sealed by builders module=distribute module=flashbots_client targetBlock=21580006 consideredByBuilders=0 sealedByBuilders=0
-2025/01/08 13:18:49 DEBUG Bundle considered or sealed by builders module=distribute module=flashbots_client targetBlock=21580006 consideredByBuilders=12 sealedByBuilders=12
-Distributed minipool! Arbitrage tx: https://etherscan.io/tx/0x0c..35
-```
-
-The log output is in a structured logging format with timestamps and values displayed in a `key=value` format. Below is an explanation of the main log messages:
-- `start waiting for bundle inclusion`: 
-    - Printed for each monitored bundle (usually three bundles).
-    - Indicates the tool has started monitoring the bundle's status.
-- `Bundle received and simulated`: 
-        - Indicates the bundle was processed by the relay, and the simulation was successful.
-- `Bundle considered or sealed by builders`: 
-    - This is a periodic log (usually printed every second).
-    - It shows how many builders are considering the bundle and the likelihood of its inclusion in the target block.
+![Allnodes help image](png/allnodes.png)
 
 ---
 
