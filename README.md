@@ -441,6 +441,8 @@ If you are not using the Rocket Pool smartnode Docker version, this flag allows 
   ./distribute --rpc="https://mainnet.infura.io/v3/YOUR_PROJECT_ID"
   ```
 
+Notice: When using a free RPC connection, consider setting a rate limit to avoid overloading the endpoint. Use the `--ratelimit` flag to control the number of calls per second, ensuring compliance with provider limits.
+
 ---
 
 ## RPC Port
@@ -504,6 +506,19 @@ If you are not using the Rocket Pool smartnode Docker version, this flag allows 
   **Example**:
   ```bash
   ./distribute --dryRun
+  ```
+
+---
+
+## Ratelimit
+
+- **Flag**: `--ratelimit`
+  **Type**: int  (timeout in ms)
+  **Default**: `0`  
+  **Description**: Enforces rate limiting on the RPC. This is set as the time in milliseconds between each RPC call. 
+  **Example**: If you are limited to four calls per second, use a timeout of 250 ms.
+  ```bash
+  ./distribute --ratelimit=250
   ```
 
 ---

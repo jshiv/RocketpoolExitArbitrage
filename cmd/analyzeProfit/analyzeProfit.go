@@ -190,6 +190,7 @@ func estimateProfit(ctx context.Context, logger *slog.Logger, client *ethclient.
 		addresses,
 		networkID.Uint64(),
 		false,
+		500,
 		arbitrage.BestProtocol,
 	)
 	if err != nil {
@@ -233,7 +234,7 @@ func getExampleProfits(ctx context.Context, logger *slog.Logger, client *ethclie
 
 	// get best pool to swap rETH
 	ratio := new(big.Float).SetFloat64(1.99)
-	_, uniswapReturnAmountWeth, _, err := uniswap.GetBestPoolWithdrawArb(ctx, logger, networkID.Uint64(), client, rethToBurn, ratio)
+	_, uniswapReturnAmountWeth, _, err := uniswap.GetBestPoolWithdrawArb(ctx, logger, networkID.Uint64(), client, rethToBurn, ratio, 500)
 	if err != nil {
 		return 0, errors.Join(errors.New("failed to get best pool"), err)
 	}

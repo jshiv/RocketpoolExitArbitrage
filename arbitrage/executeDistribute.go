@@ -35,7 +35,7 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 	isWithdrawalAddress := false
 	isNodeAddress := false
 	if dataIn.ReceiverAddress == nil {
-		withdrawalAddress, err := getWithdrawalAddress(ctx, dataIn.Client, dataIn.NetworkId, *dataIn.NodeAddress)
+		withdrawalAddress, err := getWithdrawalAddress(ctx, dataIn.Client, dataIn.NetworkId, *dataIn.NodeAddress, dataIn.Ratelimit)
 		if err != nil {
 			return errors.Join(errors.New("failed to get withdrawal address"), err)
 		}
@@ -274,7 +274,7 @@ func waitForUserConfirmation(isUsingLocalReth bool) bool {
 	}
 }
 
-func getWithdrawalAddress(ctx context.Context, client *ethclient.Client, networkId uint64, nodeAddress common.Address) (common.Address, error) {
+func getWithdrawalAddress(ctx context.Context, client *ethclient.Client, networkId uint64, nodeAddress common.Address, ratelimit int) (common.Address, error) {
 	rocketpoolStorageAddress, err := GetRocketpoolStorageAddress(networkId)
 	if err != nil {
 		return common.Address{}, errors.Join(errors.New("failed to get rocketpool storage address"), err)
@@ -297,7 +297,9 @@ func getWithdrawalAddress(ctx context.Context, client *ethclient.Client, network
 	if err != nil {
 		return common.Address{}, errors.Join(errors.New("failed to get node withdrawal address"), err)
 	}
-	time.Sleep(275 * time.Millisecond)
+	if ratelimit > 0 {
+		time.Sleep(time.Duration(ratelimit) * time.Millisecond)
+	}
 
 	return address, nil
 }

@@ -65,6 +65,7 @@ func parseInput(ctx context.Context, logger *slog.Logger) (data *arbitrage.DataI
 		"",
 		"Private key for the node address used as caller. This can be used if the script should not use the RP daemon to sign transactions. (e.g. when using Allnode)",
 	)
+	ratelimitFlag := flag.Int("ratelimit", 0, "Rate limit in milliseconds between each minipool distribution call. (default: 0)")
 
 	flag.Parse()
 
@@ -236,6 +237,9 @@ func parseInput(ctx context.Context, logger *slog.Logger) (data *arbitrage.DataI
 	if data.NetworkId == 17000 && !data.LocalReth {
 		return nil, errors.New("holesky does not support flashloan's")
 	}
+
+	data.Ratelimit = *ratelimitFlag
+	logger.Debug("ratelimit", slog.Int("ratelimit", data.Ratelimit))
 
 	return data, nil
 }

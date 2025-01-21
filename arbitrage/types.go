@@ -33,6 +33,7 @@ type DataIn struct {
 	CheckProfit                     bool
 	CheckProfitIgnoreDistributeCost bool
 	DryRun                          bool
+	Ratelimit                       int
 	Protocol                        Protocol
 	NetworkId                       uint64
 }
@@ -41,12 +42,12 @@ type UniswapArbitrage struct {
 	expectedProfit          *big.Int
 	expectedProfitAfterFees *big.Int
 
-	swapInAmountWeth        *big.Int
-	swapOutAmountReth       *big.Int
-	sqrtPriceLimitX96 		*big.Int
+	swapInAmountWeth  *big.Int
+	swapOutAmountReth *big.Int
+	sqrtPriceLimitX96 *big.Int
 
-	expectedFee             int
-	poolAddress             common.Address
+	expectedFee int
+	poolAddress common.Address
 }
 
 func (ua *UniswapArbitrage) GetExpectedProfit() *big.Int {

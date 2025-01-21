@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"math/big"
 	"rocketpoolArbitrage/rocketpoolContracts/minipoolDelegate"
+	"time"
 )
 
 func VerifyInputData(ctx context.Context, logger *slog.Logger, dataIn *DataIn) error {
@@ -28,6 +29,9 @@ func VerifyInputData(ctx context.Context, logger *slog.Logger, dataIn *DataIn) e
 		if err != nil {
 			return errors.Join(fmt.Errorf("%s: failed to get minipool version", minipoolAddress), err)
 		}
+		if dataIn.Ratelimit > 0 {
+			time.Sleep(time.Duration(dataIn.Ratelimit) * time.Millisecond)
+		}
 
 		logger.Debug("minipool version", slog.Uint64("version", uint64(version)))
 
@@ -38,6 +42,9 @@ func VerifyInputData(ctx context.Context, logger *slog.Logger, dataIn *DataIn) e
 		status, err := GetMinipoolStatus(ctx, minipoolInstance)
 		if err != nil {
 			return errors.Join(fmt.Errorf("%s: failed to get minipool status", minipoolAddress), err)
+		}
+		if dataIn.Ratelimit > 0 {
+			time.Sleep(time.Duration(dataIn.Ratelimit) * time.Millisecond)
 		}
 
 		logger.Debug("minipool status", slog.Uint64("status", uint64(status)))
@@ -51,6 +58,9 @@ func VerifyInputData(ctx context.Context, logger *slog.Logger, dataIn *DataIn) e
 			nodeAddress, err := GetMinipoolNodeAddress(ctx, minipoolInstance)
 			if err != nil {
 				return errors.Join(fmt.Errorf("%s: failed to get node address", minipoolAddress), err)
+			}
+			if dataIn.Ratelimit > 0 {
+				time.Sleep(time.Duration(dataIn.Ratelimit) * time.Millisecond)
 			}
 
 			// first time we set the node address here
@@ -66,12 +76,18 @@ func VerifyInputData(ctx context.Context, logger *slog.Logger, dataIn *DataIn) e
 			logger.Warn("failed to get minipool balance", slog.String("minipool", minipoolAddress.Hex()))
 			continue
 		}
+		if dataIn.Ratelimit > 0 {
+			time.Sleep(time.Duration(dataIn.Ratelimit) * time.Millisecond)
+		}
 
 		if minipoolBalance.Cmp(big.NewInt(8e18)) > 0 {
 			// get node address
 			nodeAddress, err := GetMinipoolNodeAddress(ctx, minipoolInstance)
 			if err != nil {
 				return errors.Join(fmt.Errorf("%s: failed to get node address", minipoolAddress), err)
+			}
+			if dataIn.Ratelimit > 0 {
+				time.Sleep(time.Duration(dataIn.Ratelimit) * time.Millisecond)
 			}
 
 			if *dataIn.NodeAddress != nodeAddress {

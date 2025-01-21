@@ -31,12 +31,29 @@ var (
 	UniswapQ96 = new(big.Float).SetInt(new(big.Int).Lsh(big.NewInt(1), 96))
 )
 
-func GetBestPoolWithdrawArb(ctx context.Context, logger *slog.Logger, networkID uint64, client *ethclient.Client, amount *big.Int, primaryRatio *big.Float) (common.Address, *big.Int, *big.Int, error) {
+func GetBestPoolWithdrawArb(
+	ctx context.Context,
+	logger *slog.Logger,
+	networkID uint64,
+	client *ethclient.Client,
+	amount *big.Int,
+	primaryRatio *big.Float,
+	ratelimit int,
+) (common.Address, *big.Int, *big.Int, error) {
 	// withdraw swaps => zeroForOne = false
-	return GetBestPool(ctx, logger, networkID, client, false, amount, primaryRatio)
+	return GetBestPool(ctx, logger, networkID, client, false, amount, primaryRatio, ratelimit)
 }
 
-func GetBestPool(ctx context.Context, logger *slog.Logger, networkID uint64, client *ethclient.Client, zeroForOne bool, amount *big.Int, primaryRatio *big.Float) (common.Address, *big.Int, *big.Int, error) {
+func GetBestPool(
+	ctx context.Context,
+	logger *slog.Logger,
+	networkID uint64,
+	client *ethclient.Client,
+	zeroForOne bool,
+	amount *big.Int,
+	primaryRatio *big.Float,
+	ratelimit int,
+) (common.Address, *big.Int, *big.Int, error) {
 	// afaik there is no good uniswap deployment on holesky
 	if networkID != 1 {
 		return common.Address{}, nil, nil, errors.New("only mainnet is supported for uniswap arbitrage")
@@ -51,7 +68,7 @@ func GetBestPool(ctx context.Context, logger *slog.Logger, networkID uint64, cli
 		limit = big.NewInt(0)
 	}
 
-	poolAAmountIn, err := getExactOutput(ctx, client, zeroForOne, amount, big.NewInt(100), limit)
+	poolAAmountIn, err := getExactOutput(ctx, client, zeroForOne, amount, big.NewInt(100), limit, ratelimit)
 	if err != nil {
 		return common.Address{}, nil, nil, errors.Join(errors.New("failed to get pool A"), err)
 	}
@@ -61,7 +78,7 @@ func GetBestPool(ctx context.Context, logger *slog.Logger, networkID uint64, cli
 		logger.Debug("0.01 percent pool", slog.String("address", PoolB), slog.Float64("Amount In", poolAAmountFloat))
 	}
 
-	poolBAmountIn, err := getExactOutput(ctx, client, zeroForOne, amount, big.NewInt(500), limit)
+	poolBAmountIn, err := getExactOutput(ctx, client, zeroForOne, amount, big.NewInt(500), limit, ratelimit)
 	if err != nil {
 		// the pool B has a rather low liquidity - 200k USD per side as of 10.01.2025
 		// if we get an error this is probably cause by the low liquidity
@@ -83,7 +100,7 @@ func GetBestPool(ctx context.Context, logger *slog.Logger, networkID uint64, cli
 	}
 }
 
-func getExactOutput(ctx context.Context, client *ethclient.Client, zeroForOne bool, amount, fee, limit *big.Int) (*big.Int, error) {
+func getExactOutput(ctx context.Context, client *ethclient.Client, zeroForOne bool, amount, fee, limit *big.Int, ratelimit int) (*big.Int, error) {
 	quoterABI, err := abi.JSON(strings.NewReader(helper.HelperABI))
 	if err != nil {
 		return nil, errors.Join(errors.New("failed to get Quoter ABI"), err)
@@ -125,7 +142,9 @@ func getExactOutput(ctx context.Context, client *ethclient.Client, zeroForOne bo
 	if err != nil {
 		return nil, fmt.Errorf("failed to make static call: %v", err)
 	}
-	time.Sleep(275 * time.Millisecond)
+	if ratelimit > 0 {
+		time.Sleep(time.Duration(ratelimit) * time.Millisecond)
+	}
 
 	var result struct {
 		AmountIn                *big.Int
@@ -145,7 +164,7 @@ func getExactOutput(ctx context.Context, client *ethclient.Client, zeroForOne bo
 	return result.AmountIn, nil
 }
 
-func getExactInput(ctx context.Context, client *ethclient.Client, zeroForOne bool, amount, fee, limit *big.Int) (*big.Int, error) {
+func getExactInput(ctx context.Context, client *ethclient.Client, zeroForOne bool, amount, fee, limit *big.Int, ratelimit int) (*big.Int, error) {
 	quoterABI, err := abi.JSON(strings.NewReader(helper.HelperABI))
 	if err != nil {
 		return nil, errors.Join(errors.New("failed to get Quoter ABI"), err)
@@ -187,7 +206,9 @@ func getExactInput(ctx context.Context, client *ethclient.Client, zeroForOne boo
 	if err != nil {
 		return nil, fmt.Errorf("failed to make static call: %v", err)
 	}
-	time.Sleep(275 * time.Millisecond)
+	if ratelimit > 0 {
+		time.Sleep(time.Duration(ratelimit) * time.Millisecond)
+	}
 
 	var result struct {
 		AmountOut               *big.Int

@@ -39,7 +39,7 @@ const (
 func BuildCallLocalReth(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashbots_client.Bundle, *big.Int, *big.Int, error) {
 	logger.With(slog.String("function", "BuildCallLocalReth"))
 
-	baseGas, tipGas, err := getCurrentGasSettings(ctx, dataIn.Client)
+	baseGas, tipGas, err := getCurrentGasSettings(ctx, dataIn.Client, dataIn.Ratelimit)
 	if err != nil {
 		return nil, nil, nil, errors.Join(errors.New("failed to get current gas settings"), err)
 	}
@@ -55,7 +55,7 @@ func BuildCallLocalReth(ctx context.Context, logger *slog.Logger, dataIn DataIn)
 		fmt.Printf("Sending transaction with a base fee per gas of %.2f gwei for timely inclusion.\n\n", baseGasBoostedFloat)
 	}
 
-	nonce, err := getCurrentNonce(ctx, dataIn.Client, *dataIn.NodeAddress)
+	nonce, err := getCurrentNonce(ctx, dataIn.Client, *dataIn.NodeAddress, dataIn.Ratelimit)
 	if err != nil {
 		return nil, nil, nil, errors.Join(errors.New("failed to get current nonce"), err)
 	}
@@ -74,7 +74,7 @@ func BuildCallLocalReth(ctx context.Context, logger *slog.Logger, dataIn DataIn)
 		return nil, nil, nil, errors.Join(errors.New("failed to generate distribute calls"), err)
 	}
 
-	rETHShare, err := CalcaulteDistributedBalance(ctx, logger, dataIn.Client, dataIn.MinipoolAddresses)
+	rETHShare, err := CalcaulteDistributedBalance(ctx, logger, dataIn.Client, dataIn.MinipoolAddresses, dataIn.Ratelimit)
 	if err != nil {
 		return nil, nil, nil, errors.Join(errors.New("failed to calculate distributed balance"), err)
 	}
@@ -99,7 +99,9 @@ func BuildCallLocalReth(ctx context.Context, logger *slog.Logger, dataIn DataIn)
 	if err != nil {
 		return nil, nil, nil, errors.Join(errors.New("failed to convert rETH to WETH"), err)
 	}
-	time.Sleep(275 * time.Millisecond)
+	if dataIn.Ratelimit > 0 {
+		time.Sleep(time.Duration(dataIn.Ratelimit) * time.Millisecond)
+	}
 
 	logger.Debug("calculated rETH to burn", slog.String("rethToBurn", rethToBurn.String()))
 
@@ -117,7 +119,9 @@ func BuildCallLocalReth(ctx context.Context, logger *slog.Logger, dataIn DataIn)
 	logger.Debug("signed burn tx", slog.String("txHash", signedBurnTx.Hash().Hex()))
 	txs = append(txs, signedBurnTx)
 
-	time.Sleep(1000 * time.Millisecond)
+	if dataIn.Ratelimit > 0 {
+		time.Sleep(time.Duration(dataIn.Ratelimit*4) * time.Millisecond)
+	}
 	bundle := flashbots_client.NewBundleWithTransactions(txs)
 
 	return bundle, rethToBurn, rETHShare, nil
@@ -126,7 +130,7 @@ func BuildCallLocalReth(ctx context.Context, logger *slog.Logger, dataIn DataIn)
 func BuildCall(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashbots_client.Bundle, *big.Int, error) {
 	logger.With(slog.String("function", "BuildCall"))
 
-	baseGas, tipGas, err := getCurrentGasSettings(ctx, dataIn.Client)
+	baseGas, tipGas, err := getCurrentGasSettings(ctx, dataIn.Client, dataIn.Ratelimit)
 	if err != nil {
 		return nil, nil, errors.Join(errors.New("failed to get current gas settings"), err)
 	}
@@ -142,7 +146,7 @@ func BuildCall(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashb
 		fmt.Printf("Sending transaction with a base fee per gas of %.2f gwei for timely inclusion.\n\n", baseGasBoostedFloat)
 	}
 
-	nonce, err := getCurrentNonce(ctx, dataIn.Client, *dataIn.NodeAddress)
+	nonce, err := getCurrentNonce(ctx, dataIn.Client, *dataIn.NodeAddress, dataIn.Ratelimit)
 	if err != nil {
 		return nil, nil, errors.Join(errors.New("failed to get current nonce"), err)
 	}
@@ -169,6 +173,7 @@ func BuildCall(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashb
 		dataIn.MinipoolAddresses,
 		dataIn.NetworkId,
 		dataIn.DryRun,
+		dataIn.Ratelimit,
 		dataIn.Protocol,
 	)
 	if err != nil {
@@ -324,13 +329,15 @@ func BuildCall(ctx context.Context, logger *slog.Logger, dataIn DataIn) (*flashb
 		return nil, nil, errors.New("invalid protocol")
 	}
 
-	time.Sleep(1000 * time.Millisecond)
+	if dataIn.Ratelimit > 0 {
+		time.Sleep(time.Duration(dataIn.Ratelimit*4) * time.Millisecond)
+	}
 	bundle := flashbots_client.NewBundleWithTransactions(txs)
 
 	return bundle, expectedProfit, nil
 }
 
-func CalcaulteDistributedBalance(ctx context.Context, logger *slog.Logger, client *ethclient.Client, minipoolAddresses []common.Address) (*big.Int, error) {
+func CalcaulteDistributedBalance(ctx context.Context, logger *slog.Logger, client *ethclient.Client, minipoolAddresses []common.Address, ratelimit int) (*big.Int, error) {
 	totalNodeShare := new(big.Int)
 	totalDistributeAmount := new(big.Int)
 	for _, minipoolAddress := range minipoolAddresses {
@@ -338,7 +345,6 @@ func CalcaulteDistributedBalance(ctx context.Context, logger *slog.Logger, clien
 		if err != nil {
 			return nil, errors.Join(errors.New("failed to get minipool balance"), err)
 		}
-		time.Sleep(275 * time.Millisecond)
 
 		logger.Debug("fetched minipool balance",
 			slog.String("minipool", minipoolAddress.Hex()),
@@ -354,7 +360,9 @@ func CalcaulteDistributedBalance(ctx context.Context, logger *slog.Logger, clien
 		if err != nil {
 			return nil, errors.Join(errors.New("failed to get refund balance"), err)
 		}
-		time.Sleep(275 * time.Millisecond)
+		if ratelimit > 0 {
+			time.Sleep(time.Duration(ratelimit) * time.Millisecond)
+		}
 
 		distributeAmount := new(big.Int).Sub(balance, refundBalance)
 
@@ -368,7 +376,9 @@ func CalcaulteDistributedBalance(ctx context.Context, logger *slog.Logger, clien
 		if err != nil {
 			return nil, errors.Join(errors.New("failed to calculate rETH share"), err)
 		}
-		time.Sleep(275 * time.Millisecond)
+		if ratelimit > 0 {
+			time.Sleep(time.Duration(ratelimit) * time.Millisecond)
+		}
 
 		nodeShare := new(big.Int).Sub(balance, rETHShare)
 
@@ -394,6 +404,7 @@ func CalcualteArbitrageData(
 	minipoolAddresses []common.Address,
 	networkId uint64,
 	dryRun bool,
+	ratelimit int,
 	protocol Protocol,
 ) (*UniswapArbitrage, *ParaswapArbitrage, error) {
 	rEthContractAddress, err := GetREthContractAddress(networkId)
@@ -406,7 +417,7 @@ func CalcualteArbitrageData(
 		return nil, nil, errors.Join(errors.New("failed to create rETH instance"), err)
 	}
 
-	rETHShare, err := CalcaulteDistributedBalance(ctx, logger, client, minipoolAddresses)
+	rETHShare, err := CalcaulteDistributedBalance(ctx, logger, client, minipoolAddresses, ratelimit)
 	if err != nil {
 		return nil, nil, errors.Join(errors.New("failed to calculate distributed balance"), err)
 	}
@@ -426,7 +437,9 @@ func CalcualteArbitrageData(
 	if err != nil {
 		return nil, nil, errors.Join(errors.New("failed to convert rETH to WETH"), err)
 	}
-	time.Sleep(275 * time.Millisecond)
+	if ratelimit > 0 {
+		time.Sleep(time.Duration(ratelimit) * time.Millisecond)
+	}
 
 	logger.Debug("calculated rETH to burn", slog.String("rethToBurn", rethToBurn.String()))
 
@@ -441,7 +454,7 @@ func CalcualteArbitrageData(
 	primaryRatio := new(big.Float).Quo(new(big.Float).SetInt(rETHShare), new(big.Float).SetInt(rethToBurn))
 
 	// get best pool to swap rETH
-	poolAddress, uniswapReturnAmountWeth, sqrtPriceLimitX96, err := uniswap.GetBestPoolWithdrawArb(ctx, logger, networkId, client, rethToBurn, primaryRatio)
+	poolAddress, uniswapReturnAmountWeth, sqrtPriceLimitX96, err := uniswap.GetBestPoolWithdrawArb(ctx, logger, networkId, client, rethToBurn, primaryRatio, ratelimit)
 	if err != nil {
 		if errors.Is(err, uniswap.ErrPriceLimitExceeded) {
 			if protocol == ParaswapProtocol {
@@ -479,7 +492,7 @@ func CalcualteArbitrageData(
 	return dataUniswap, dataParaswap, nil
 }
 
-func getCurrentGasSettings(ctx context.Context, client *ethclient.Client) (baseGas *big.Int, tipGas *big.Int, err error) {
+func getCurrentGasSettings(ctx context.Context, client *ethclient.Client, ratelimit int) (baseGas *big.Int, tipGas *big.Int, err error) {
 	// Get gas price
 	timeoutCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
 	defer cancel()
@@ -505,17 +518,23 @@ func getCurrentGasSettings(ctx context.Context, client *ethclient.Client) (baseG
 		}
 	})
 
-	time.Sleep(2 * 275 * time.Millisecond)
+	if ratelimit > 0 {
+		time.Sleep(time.Duration(2*ratelimit) * time.Millisecond)
+	}
+
 	return baseGas, tipGas, eg.Wait()
 }
 
-func getCurrentNonce(ctx context.Context, client *ethclient.Client, address common.Address) (uint64, error) {
+func getCurrentNonce(ctx context.Context, client *ethclient.Client, address common.Address, ratelimit int) (uint64, error) {
 	nonce, err := client.PendingNonceAt(ctx, address)
 	if err != nil {
 		return 0, errors.Join(errors.New("failed to get current nonce"), err)
 	}
 
-	time.Sleep(275 * time.Millisecond)
+	if ratelimit > 0 {
+		time.Sleep(time.Duration(ratelimit) * time.Millisecond)
+	}
+
 	return nonce, nil
 }
 
@@ -577,7 +596,7 @@ func generateArbitrageCall(chainId, nonce uint64, uniswapData *UniswapArbitrage,
 	if err != nil {
 		return nil, errors.Join(errors.New("failed to get arbitrage ABI"), err)
 	}
-	
+
 	callData, err := arbitrageAbi.Pack(
 		"arb",
 		uniswapData.poolAddress,
