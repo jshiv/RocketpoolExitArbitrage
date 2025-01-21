@@ -12,6 +12,7 @@ import (
 	"rocketpoolArbitrage/rocketpoolContracts/rETH"
 	uniswap "rocketpoolArbitrage/uniswapContracts"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -174,6 +175,7 @@ func estimateProfit(ctx context.Context, logger *slog.Logger, client *ethclient.
 	if err != nil {
 		return nil, nil, errors.Join(errors.New("failed to get network ID"), err)
 	}
+	time.Sleep(500 * time.Millisecond)
 
 	addresses := make([]common.Address, len(data.Minipools))
 	for i, minipool := range data.Minipools {
@@ -193,6 +195,7 @@ func estimateProfit(ctx context.Context, logger *slog.Logger, client *ethclient.
 	if err != nil {
 		return nil, nil, errors.Join(errors.New("failed to calculate arbitrage data"), err)
 	}
+	time.Sleep(500 * time.Millisecond)
 
 	uniswapExpectedProfit := uniswapData.GetExpectedProfit()
 	paraswapExpectedProfit := paraswapData.GetExpectedProfit()
@@ -209,6 +212,7 @@ func getExampleProfits(ctx context.Context, logger *slog.Logger, client *ethclie
 	if err != nil {
 		return 0, errors.Join(errors.New("failed to get network ID"), err)
 	}
+	time.Sleep(500 * time.Millisecond)
 
 	rETHAddress, err := arbitrage.GetREthContractAddress(networkID.Uint64())
 	if err != nil {
@@ -219,6 +223,7 @@ func getExampleProfits(ctx context.Context, logger *slog.Logger, client *ethclie
 	if err != nil {
 		return 0, err
 	}
+	time.Sleep(500 * time.Millisecond)
 
 	rETHShare := new(big.Int).Mul(big.NewInt(int64(amountToDistribute)), big.NewInt(1e15))
 	rethToBurn, err := arbitrage.ConvertWethToReth(ctx, rethInstance, rETHShare)
@@ -228,7 +233,7 @@ func getExampleProfits(ctx context.Context, logger *slog.Logger, client *ethclie
 
 	// get best pool to swap rETH
 	ratio := new(big.Float).SetFloat64(1.99)
-	_, uniswapReturnAmountWeth, _, err := uniswap.GetBestPoolWithdrawArb(ctx, logger, client, rethToBurn, ratio)
+	_, uniswapReturnAmountWeth, _, err := uniswap.GetBestPoolWithdrawArb(ctx, logger, networkID.Uint64(), client, rethToBurn, ratio)
 	if err != nil {
 		return 0, errors.Join(errors.New("failed to get best pool"), err)
 	}

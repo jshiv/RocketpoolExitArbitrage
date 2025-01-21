@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"rocketpoolArbitrage/uniswapContracts/helper"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -30,18 +31,14 @@ var (
 	UniswapQ96 = new(big.Float).SetInt(new(big.Int).Lsh(big.NewInt(1), 96))
 )
 
-func GetBestPoolWithdrawArb(ctx context.Context, logger *slog.Logger, client *ethclient.Client, amount *big.Int, primaryRatio *big.Float) (common.Address, *big.Int, *big.Int, error) {
+func GetBestPoolWithdrawArb(ctx context.Context, logger *slog.Logger, networkID uint64, client *ethclient.Client, amount *big.Int, primaryRatio *big.Float) (common.Address, *big.Int, *big.Int, error) {
 	// withdraw swaps => zeroForOne = false
-	return GetBestPool(ctx, logger, client, false, amount, primaryRatio)
+	return GetBestPool(ctx, logger, networkID, client, false, amount, primaryRatio)
 }
 
-func GetBestPool(ctx context.Context, logger *slog.Logger, client *ethclient.Client, zeroForOne bool, amount *big.Int, primaryRatio *big.Float) (common.Address, *big.Int, *big.Int, error) {
+func GetBestPool(ctx context.Context, logger *slog.Logger, networkID uint64, client *ethclient.Client, zeroForOne bool, amount *big.Int, primaryRatio *big.Float) (common.Address, *big.Int, *big.Int, error) {
 	// afaik there is no good uniswap deployment on holesky
-	networkID, err := client.NetworkID(ctx)
-	if err != nil {
-		return common.Address{}, nil, nil, errors.Join(errors.New("failed to verify client connection"), err)
-	}
-	if networkID.Uint64() != 1 {
+	if networkID != 1 {
 		return common.Address{}, nil, nil, errors.New("only mainnet is supported for uniswap arbitrage")
 	}
 
@@ -128,6 +125,7 @@ func getExactOutput(ctx context.Context, client *ethclient.Client, zeroForOne bo
 	if err != nil {
 		return nil, fmt.Errorf("failed to make static call: %v", err)
 	}
+	time.Sleep(275 * time.Millisecond)
 
 	var result struct {
 		AmountIn                *big.Int
@@ -189,6 +187,7 @@ func getExactInput(ctx context.Context, client *ethclient.Client, zeroForOne boo
 	if err != nil {
 		return nil, fmt.Errorf("failed to make static call: %v", err)
 	}
+	time.Sleep(275 * time.Millisecond)
 
 	var result struct {
 		AmountOut               *big.Int

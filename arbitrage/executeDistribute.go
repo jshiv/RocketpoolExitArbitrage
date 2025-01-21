@@ -297,6 +297,7 @@ func getWithdrawalAddress(ctx context.Context, client *ethclient.Client, network
 	if err != nil {
 		return common.Address{}, errors.Join(errors.New("failed to get node withdrawal address"), err)
 	}
+	time.Sleep(275 * time.Millisecond)
 
 	return address, nil
 }
