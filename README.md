@@ -56,7 +56,7 @@ If you encounter any issues while using the tool, please open a GitHub issue so 
 
 ## Smart Contract
 
-To execute a Flashswap with Uniswap and simultaneously burn rETH within a single transaction, I developed and deployed a custom smart contract. This contract is fully verified on Etherscan and can be viewed [here](https://etherscan.io/address/0x228125B5519861a9176c1E4b12beeb2d41142D92#code). The contract provides two functions. The first (`arb`) executes a flash swap arbitrage call using Uniswap. The second (`arbParaswap`) allows users to take a flash loan via [Morpho](https://morpho.org/) and perform an aggregated swap using Paraswap.
+To execute a Flashswap with Uniswap and simultaneously burn rETH within a single transaction, I developed and deployed a custom smart contract. This contract is fully verified on Etherscan and can be viewed [here](https://etherscan.io/address/0x2631618408497d27D455aBA9c99A6f61eF305559#code). The contract provides two functions. The first (`arb`) executes a flash swap arbitrage call using Uniswap. The second (`arbParaswap`) allows users to take a flash loan via [Morpho](https://morpho.org/) and perform an aggregated swap using Paraswap.
 
 
 ### Key Features
