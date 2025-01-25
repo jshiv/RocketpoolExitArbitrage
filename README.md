@@ -3,7 +3,7 @@
 > **WARNING**  
 > This software is an **initial version** and **has not been thoroughly tested**.  
 > Use at your own risk. No guarantees are provided, and we assume no liability for any potential losses or damages resulting from its use.
-> The flashloan functionality has been tested and there is reasonable level of confidence in its performance (e.g. [Uniswap](https://etherscan.io/tx/0x2b047ce03e8323b1f622de3c6ce9136b4b4b13321e01b324d360786eaba392e4) or [Paraswap](https://etherscan.io/tx/0x57923f69bd0b33648ef650b39c4e64fcbc0569a5e52ea5aad2cba8a7a85b3e79)). The rETH burn bundle was tested on holesky (e.g. [burn](https://holesky.etherscan.io/tx/0x7bc144b4e2014c815f5f77d23385a52c178e1e354326f04c8a5e396555a3b984)).
+> The flashloan functionality has been tested and there is reasonable level of confidence in its performance (e.g. [Uniswap](https://etherscan.io/tx/0x2b047ce03e8323b1f622de3c6ce9136b4b4b13321e01b324d360786eaba392e4) or [Paraswap](https://etherscan.io/tx/0x2a023b8f93e072b48b62de00c7737484e26c3585eb00bb0fbdb5d4827a364e28)). The rETH burn bundle was tested on holesky (e.g. [burn](https://holesky.etherscan.io/tx/0x7bc144b4e2014c815f5f77d23385a52c178e1e354326f04c8a5e396555a3b984)).
 > Always review the code and run your own tests before using it in a production environment.
 
 ---
@@ -499,13 +499,13 @@ Notice: When using a free RPC connection, consider setting a rate limit to avoid
 
 ## Dry Run Mode
 
-- **Flag**: `--dryRun`  
+- **Flag**: `--dry-run`  
   **Type**: boolean  
   **Default**: `false`  
   **Description**: Performs a dry run without sending the bundle to Flashbots; only prints the transaction bundle.  
   **Example**:
   ```bash
-  ./distribute --dryRun
+  ./distribute --dry-run
   ```
 
 ---
