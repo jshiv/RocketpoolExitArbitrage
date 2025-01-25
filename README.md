@@ -499,13 +499,13 @@ Notice: When using a free RPC connection, consider setting a rate limit to avoid
 
 ## Dry Run Mode
 
-- **Flag**: `--dryRun`  
+- **Flag**: `--dry-run`  
   **Type**: boolean  
   **Default**: `false`  
   **Description**: Performs a dry run without sending the bundle to Flashbots; only prints the transaction bundle.  
   **Example**:
   ```bash
-  ./distribute --dryRun
+  ./distribute --dry-run
   ```
 
 ---
