@@ -84,20 +84,21 @@ func parseInput(ctx context.Context, logger *slog.Logger) (data *arbitrage.DataI
 
 	data.MinipoolAddresses = []common.Address{}
 	if *minipoolFlag != "" {
-		if !common.IsHexAddress(*minipoolFlag) {
-			return nil, errors.New("minipool address is invalid")
+		minipoolStr := strings.Trim(*minipoolFlag, " \"'")
+		if !common.IsHexAddress(minipoolStr) {
+			return nil, fmt.Errorf("minipool address _%s_ is invalid", minipoolStr)
 		}
 
-		data.MinipoolAddresses = append(data.MinipoolAddresses, common.HexToAddress(*minipoolFlag))
-		logger.Debug("minipool", slog.String("minipool", common.HexToAddress(*minipoolFlag).Hex()))
+		data.MinipoolAddresses = append(data.MinipoolAddresses, common.HexToAddress(minipoolStr))
+		logger.Debug("minipool", slog.String("minipool", common.HexToAddress(minipoolStr).Hex()))
 	}
 
 	if *minipoolsFlag != "" {
 		minipools := strings.Split(*minipoolsFlag, ",")
 		for _, minipool := range minipools {
-			minipool = strings.TrimSpace(minipool) // handle whitespace
+			minipool = strings.Trim(minipool, " \"'")
 			if !common.IsHexAddress(minipool) {
-				return nil, fmt.Errorf("minipool address %s is invalid", minipool)
+				return nil, fmt.Errorf("minipool address _%s_ is invalid", minipool)
 			}
 
 			data.MinipoolAddresses = append(data.MinipoolAddresses, common.HexToAddress(minipool))
