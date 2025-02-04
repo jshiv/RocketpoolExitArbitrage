@@ -97,7 +97,7 @@ For this initial version, **no binaries are provided**. You will need to **insta
 1. **Clone this repository**:
 
     ```bash
-    git clone https://github.com//0xtrooper/RocketpoolExitArbitrage.git && cd RocketpoolExitArbitrage    
+    git clone https://github.com/rocketpoolgmc/RocketpoolExitArbitrage.git && cd RocketpoolExitArbitrage    
     ```
 
 2. **Build the binary**:
