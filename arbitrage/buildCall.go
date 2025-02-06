@@ -792,7 +792,7 @@ func fetchParaswapData(
 	respPrices, err := client.Do(reqPrices)
 	if err != nil {
 		return nil, errors.Join(errors.New("failed to send request"), err)
-	}	
+	}
 	defer respPrices.Body.Close()
 
 	if respPrices.StatusCode < http.StatusOK || respPrices.StatusCode >= http.StatusMultipleChoices {

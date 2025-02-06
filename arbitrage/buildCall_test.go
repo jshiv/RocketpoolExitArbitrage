@@ -28,9 +28,9 @@ func Test_fetchParaswapData(t *testing.T) {
 		wantErr bool
 	}{}
 
-	amounts := []int64{1, 1*24, 2*24, 3*24, 4*24, 5*24, 6*24, 7*24, 8*24, 9*24, 10*24}
+	amounts := []int64{1, 1 * 24, 2 * 24, 3 * 24, 4 * 24, 5 * 24, 6 * 24, 7 * 24, 8 * 24, 9 * 24, 10 * 24}
 	for _, amt := range amounts {
-		newTest :=struct {
+		newTest := struct {
 			name    string
 			args    args
 			want    *ParaswapArbitrage
@@ -47,7 +47,7 @@ func Test_fetchParaswapData(t *testing.T) {
 			},
 			want:    &ParaswapArbitrage{},
 			wantErr: false,
-		}	
+		}
 		tests = append(tests, newTest)
 	}
 	for _, tt := range tests {
