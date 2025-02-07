@@ -118,7 +118,7 @@ For this initial version, **no binaries are provided**. You will need to **insta
 
 ## How to simulate
 
-You can use the `--dry-run` option to generate an example bundle without executing it. This option also displays the individual transactions involved. If you are using this tool to burn rETH, the transactions will always be printed. As that action is not time sensitive, take your time to confirm the transactions. They can be simulated using tools like [Tenderly](tenderly.co). 
+You can use the `--dry-run` option to generate an example bundle without executing it. This option also displays the individual transactions involved. If you are using this tool to burn rETH, the transactions will always be printed. As that action is not time sensitive, take your time to confirm the transactions. They can be simulated using tools like [Tenderly](https://tenderly.co/). 
 Since the transactions are sent as part of an MEV bundle, their execution depends on the state resulting from the previous transactions. Therefore, it is essential to update the chain state while simulating. Our primary focus is on the final transaction, as it executes the arbitrage.
 Below is an example of the `dry-run` option:
 ```
@@ -269,7 +269,7 @@ If you prefer not to run the CLI tool on your validator machine, you can execute
     - Use the `--node-private-key` flag to provide the private key for the node address used as the caller.
     - Example command:
     ```bash
-    ./distribute --rpc="your_rpc_url" --node-private-key="your_private_key" --minipools="0xABC123...,0xDEF456..."
+    ./distribute --rpc=your_rpc_url --node-private-key=your_private_key --minipools=0xABC123...,0xDEF456...
     ```
 
 By following these steps, you can safely run the CLI tool on an external machine, ensuring that your validator machine remains secure and isolated from potential risks associated with running additional software. While the tool has access to the node operator hot wallet, this address should not contain a lot of ETH. Therfor the risk is minimal. 
@@ -319,7 +319,7 @@ This CLI tool is configured primarily through command-line flags. Below is a lis
     - `paraswap` or `p`: Uses the Morpho as flash loan provider and Paraswap for the swapping.  
     **Example**:
     ```bash
-    ./distribute --protocol="uniswap"
+    ./distribute --protocol=uniswap
     ```
 
 ---
@@ -332,7 +332,7 @@ This CLI tool is configured primarily through command-line flags. Below is a lis
   **Description**: Single minipool address to distribute. Use this if you only want to distribute to one minipool at a time.  
   **Example**:
   ```bash
-  ./distribute --minipool="0xABC123..."
+  ./distribute --minipool=0xABC123...
   ```
 
 ---
@@ -345,7 +345,7 @@ This CLI tool is configured primarily through command-line flags. Below is a lis
   **Description**: Comma-separated list of minipool addresses to distribute. This does not reduce the gas fee per distribute, but only one arbitrage call is needed.
   **Example**:
   ```bash
-  ./distribute --minipools="0xABC123...,0xDEF456...,0x789ABC..."
+  ./distribute --minipools=0xABC123...,0xDEF456...,0x789ABC...
   ```
 
 ---
@@ -358,7 +358,7 @@ This CLI tool is configured primarily through command-line flags. Below is a lis
     **Description**: Specifies the receiver address for the arbitrage profits. If not set, the node address is used by default. This address will also receive any Flashbots gas refunds (if applicable) when no personal searcher key is used. If the `--receiver` flag is not provided, the withdrawal address of the node (specified by the `--node-address` flag) will be used.  
     **Example**:
     ```bash
-    ./distribute --receiver="0xYourReceiverAddress"
+    ./distribute --receiver=0xYourReceiverAddress
     ```
 
 ---
@@ -371,7 +371,7 @@ This CLI tool is configured primarily through command-line flags. Below is a lis
     **Description**: Specifies the node address used as the caller to sign the transactions. If not set, the first minipool's node address is used by default. This flag should only be needed in edge cases, use carefully.  
     **Example**:
     ```bash
-    ./distribute --node-address="0xYourNodeAddress"
+    ./distribute --node-address=0xYourNodeAddress
     ```
 
 ---
@@ -384,7 +384,7 @@ This CLI tool is configured primarily through command-line flags. Below is a lis
     **Description**: Specifies the private key for the node address used as the caller. This can be used if the script should not use the Rocket Pool daemon to sign transactions. For example, when using external services like Allnodes.
     **Example**:
     ```bash
-    ./distribute --node-private-key="your_private_key"
+    ./distribute --node-private-key=your_private_key
     ```
 
 ---
@@ -425,7 +425,7 @@ If you are not using the Rocket Pool smartnode Docker version, this flag allows 
   **Description**: **Completly optional!** Private key for the searcher used in Flashbots transactions. Flashbots uses a repupation based system to controll access in times of high demand. For more information: https://docs.flashbots.net/flashbots-auction/advanced/reputation 
   **Example**:
   ```bash
-  ./distribute --searcher-private-key="abcdef123456..."
+  ./distribute --searcher-private-key=abcdef123456...
   ```
 
 ---
@@ -438,7 +438,7 @@ If you are not using the Rocket Pool smartnode Docker version, this flag allows 
   **Description**: Usually, this is the Rocket Pool eth1 client. Alternatively, you can specify a different RPC endpoint if needed. Use `--rpc-port` if you only want to set a non-default port.
   **Example**:
   ```bash
-  ./distribute --rpc="https://mainnet.infura.io/v3/YOUR_PROJECT_ID"
+  ./distribute --rpc=https://mainnet.infura.io/v3/YOUR_PROJECT_ID
   ```
 
 Notice: When using a free RPC connection, consider setting a rate limit to avoid overloading the endpoint. Use the `--ratelimit` flag to control the number of calls per second, ensuring compliance with provider limits.
@@ -453,7 +453,7 @@ Notice: When using a free RPC connection, consider setting a rate limit to avoid
   **Description**: Use this flag if you are using a non-default port for the Rocket Pool eth1 client. Alternatively, you can use a different RPC endpoint with the `--rpc` flag.
   **Example**:
   ```bash
-  ./distribute --rpc-port="9545"
+  ./distribute --rpc-port=9545
   ```
 
 ---
@@ -528,7 +528,7 @@ Notice: When using a free RPC connection, consider setting a rate limit to avoid
 You can combine multiple flags in a single command. For example:
 
 ```bash
-./distribute --local-reth --minipools="0xABC123...,0xDEF456..." --debug
+./distribute --local-reth --minipools=0xABC123...,0xDEF456... --debug
 ```
 
 This example enables debug logs, uses local rETH and specifies multiple minipools.

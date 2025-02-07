@@ -12,6 +12,7 @@ import (
 	"rocketpoolArbitrage/rocketpoolContracts/storage"
 	"strings"
 	"time"
+	"unicode"
 
 	"log/slog"
 
@@ -91,17 +92,13 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 	}
 
 	logger.Debug("created flashbots client")
-	res, success, err := dataIn.FbClient.SimulateBundle(bundle, 0)
+	success, bundleHash, arbTxHash, err := simulateBundle(logger, dataIn, bundle)
 	if err != nil {
-		return errors.Join(errors.New("failed to simulate bundle"), err)
-	}
-
-	// udpate success based on tx results
-	for index, tx := range res.Results {
-		if tx.Error != "" {
-			logger.Warn("tx failed", slog.Int("index", index), slog.String("error", tx.Error), slog.String("revertReason", hex.EncodeToString([]byte(tx.RevertReason))))
-			success = false
+		// handle known revert reasons, user was updated in the simulateBundle function
+		if strings.EqualFold(err.Error(), "Paraswap failed") || strings.EqualFold(err.Error(), "Insufficient ETH balance for exchange") {
+			return nil
 		}
+		return errors.Join(errors.New("failed to simulate bundle"), err)
 	}
 
 	maxBundleFees, maxArbitrageFees := evalGasPrices(bundle)
@@ -197,7 +194,7 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 	}
 	bundle.SetTargetBlockNumber(blockNumber + 1)
 
-	fmt.Printf("\nSent bundle with hash: %s. Waiting for up to one minute to see if the transaction is included...\n\n", res.BundleHash)
+	fmt.Printf("\nSent bundle with hash: %s. Waiting for up to one minute to see if the transaction is included...\n\n", bundleHash)
 
 	timeoutContext, cancel := context.WithTimeout(ctx, time.Second*70)
 	successfullyIncluded, err := dataIn.FbClient.SendNBundleAndWait(timeoutContext, bundle, 4)
@@ -227,12 +224,10 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 	} else if dataIn.NetworkId == 17000 {
 		explorer = "https://explorer.holesky.io/tx/"
 	}
-	if len(res.Results) == 2 {
-		arbTx := res.Results[1]
-		fmt.Printf("Distributed minipool! %s tx: %s%s\n\n", txType, explorer, arbTx.TxHash.Hex())
+	if len(bundle.Transactions()) == 2 {
+		fmt.Printf("Distributed minipool! %s tx: %s%s\n\n", txType, explorer, arbTxHash.Hex())
 	} else {
-		arbTx := res.Results[len(res.Results)-1]
-		fmt.Printf("Distributed minipools! %s tx: %s%s\n\n", txType, explorer, arbTx.TxHash.Hex())
+		fmt.Printf("Distributed minipools! %s tx: %s%s\n\n", txType, explorer, arbTxHash.Hex())
 	}
 
 	return nil
@@ -302,4 +297,80 @@ func getWithdrawalAddress(ctx context.Context, client *ethclient.Client, network
 	}
 
 	return address, nil
+}
+
+func simulateBundle(logger *slog.Logger, dataIn *DataIn, bundle *flashbots_client.Bundle) (bool, common.Hash, common.Hash, error) {
+	simulationStateBlock, err := dataIn.Client.BlockNumber(context.Background())
+	if err != nil {
+		return false, common.Hash{}, common.Hash{}, errors.Join(errors.New("failed to get block number"), err)
+	}
+
+	res, success, err := dataIn.FbClient.SimulateBundle(bundle, simulationStateBlock)
+	// If there was an error and it's the special "header not found" error, try with previous block
+	if err != nil && strings.Contains(err.Error(), "header not found") {
+		logger.Debug("header not found, retrying", slog.Uint64("previous block", simulationStateBlock-1))
+		res, success, err = dataIn.FbClient.SimulateBundle(bundle, simulationStateBlock-1)
+	}
+	if err != nil {
+		return false, common.Hash{}, common.Hash{}, err
+	}
+
+	for index, tx := range res.Results {
+		if tx.Error != "" {
+			parsedMsg := sanitizeString(tx.RevertReason)
+			// handle known revert reasons
+			if strings.EqualFold(parsedMsg, "Paraswap failed") || strings.EqualFold(parsedMsg, "Insufficient ETH balance for exchange") {
+				fmt.Printf("\nError simulating transaction: %s\n", parsedMsg)
+				fmt.Println("This issue is often caused by significant price movements or high MEV bot activity.")
+				fmt.Println("Please try again shortly.")
+
+				return false, common.Hash{}, common.Hash{}, errors.New(parsedMsg)
+			}
+
+			logger.Warn("tx failed",
+				slog.Int("index", index),
+				slog.String("error", tx.Error),
+				slog.String("revertReason", hex.EncodeToString([]byte(tx.RevertReason))),
+				slog.String("parsedRevertReason", parsedMsg),
+			)
+
+			success = false
+		}
+	}
+
+	return success, common.Hash{}, common.Hash{}, nil
+}
+
+// best effort to sanitize revert reasons
+// the revert reason gets messed up upstream
+// to avoid a big refactor, this attempts a best-effort sanitization
+func sanitizeString(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		// Only include valid ASCII characters
+		if r >= 32 && r <= 126 {
+			b.WriteRune(r)
+		}
+	}
+
+	// Find the first two letter or digit sequence
+	sanitized := b.String()
+	runes := []rune(sanitized)
+	for i := 0; i < len(runes); i++ {
+		if unicode.IsLetter(runes[i]) || unicode.IsDigit(runes[i]) {
+			count := 1
+			// Count consecutive letters/digits starting at i.
+			for j := i + 1; j < len(runes); j++ {
+				if unicode.IsLetter(runes[j]) || unicode.IsDigit(runes[j]) {
+					count++
+				} else {
+					break
+				}
+			}
+			if count >= 2 {
+				return strings.TrimSpace(string(runes[i:]))
+			}
+		}
+	}
+	return sanitized
 }

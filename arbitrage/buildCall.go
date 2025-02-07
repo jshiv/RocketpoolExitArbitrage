@@ -747,7 +747,14 @@ func useSmartnodeDaemon(logger *slog.Logger, apiCommand string, tx *types.Transa
 	return &signedTx, nil
 }
 
-func fetchParaswapData(ctx context.Context, logger *slog.Logger, amount *big.Int, senderAddress *common.Address, rEthContractAddress common.Address, networkId uint64) (*ParaswapArbitrage, error) {
+func fetchParaswapData(
+	ctx context.Context,
+	logger *slog.Logger,
+	amount *big.Int,
+	senderAddress *common.Address,
+	rEthContractAddress common.Address,
+	networkId uint64,
+) (*ParaswapArbitrage, error) {
 	WETHContractAddress, err := GetWETHContractAddress(networkId)
 	if err != nil {
 		return nil, errors.Join(errors.New("failed to get WETH contract address"), err)
@@ -785,6 +792,11 @@ func fetchParaswapData(ctx context.Context, logger *slog.Logger, amount *big.Int
 	respPrices, err := client.Do(reqPrices)
 	if err != nil {
 		return nil, errors.Join(errors.New("failed to send request"), err)
+	}
+	defer respPrices.Body.Close()
+
+	if respPrices.StatusCode < http.StatusOK || respPrices.StatusCode >= http.StatusMultipleChoices {
+		return nil, fmt.Errorf("unexpected status code from prices API: %d", respPrices.StatusCode)
 	}
 
 	bodyPrices, err := io.ReadAll(respPrices.Body)
@@ -837,7 +849,7 @@ func fetchParaswapData(ctx context.Context, logger *slog.Logger, amount *big.Int
 	}
 
 	urlTransaction := fmt.Sprintf(
-		"https://api.paraswap.io/transactions/%d?onlyParams=true&ignoreChecks=true&ignoreGasEstimate=true",
+		"https://api.paraswap.io/transactions/%d?onlyParams=false&ignoreChecks=true&ignoreGasEstimate=true",
 		networkId,
 	)
 
@@ -869,6 +881,11 @@ func fetchParaswapData(ctx context.Context, logger *slog.Logger, amount *big.Int
 	respTransaction, err := client.Do(reqTransaction)
 	if err != nil {
 		return nil, errors.Join(errors.New("failed to send request"), err)
+	}
+	defer respTransaction.Body.Close()
+
+	if respTransaction.StatusCode < http.StatusOK || respTransaction.StatusCode >= http.StatusMultipleChoices {
+		return nil, fmt.Errorf("unexpected status code from transactions API: %d", respTransaction.StatusCode)
 	}
 
 	bodyTransaction, err := io.ReadAll(respTransaction.Body)
