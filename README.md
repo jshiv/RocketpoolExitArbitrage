@@ -118,7 +118,7 @@ For this initial version, **no binaries are provided**. You will need to **insta
 
 ## How to simulate
 
-You can use the `--dry-run` option to generate an example bundle without executing it. This option also displays the individual transactions involved. If you are using this tool to burn rETH, the transactions will always be printed. As that action is not time sensitive, take your time to confirm the transactions. They can be simulated using tools like [Tenderly](tenderly.co). 
+You can use the `--dry-run` option to generate an example bundle without executing it. This option also displays the individual transactions involved. If you are using this tool to burn rETH, the transactions will always be printed. As that action is not time sensitive, take your time to confirm the transactions. They can be simulated using tools like [Tenderly](https://tenderly.co/). 
 Since the transactions are sent as part of an MEV bundle, their execution depends on the state resulting from the previous transactions. Therefore, it is essential to update the chain state while simulating. Our primary focus is on the final transaction, as it executes the arbitrage.
 Below is an example of the `dry-run` option:
 ```
