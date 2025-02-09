@@ -338,7 +338,7 @@ func simulateBundle(logger *slog.Logger, dataIn *DataIn, bundle *flashbots_clien
 		}
 	}
 
-	return success, common.Hash{}, common.Hash{}, nil
+	return success, res.BundleHash, res.Results[len(res.Results)-1].TxHash, nil
 }
 
 // best effort to sanitize revert reasons
