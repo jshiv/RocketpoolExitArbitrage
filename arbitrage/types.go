@@ -36,6 +36,8 @@ type DataIn struct {
 	Ratelimit                       int
 	Protocol                        Protocol
 	NetworkId                       uint64
+	Threshold                       float64
+	MonitorInterval                 int
 }
 
 type UniswapArbitrage struct {

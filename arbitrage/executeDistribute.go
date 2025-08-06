@@ -32,6 +32,12 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 
 	logger.Debug("verified input data")
 
+	// Monitor profit until threshold is met if threshold is specified
+	err = MonitorProfitUntilThreshold(ctx, logger, dataIn)
+	if err != nil {
+		return errors.Join(errors.New("monitoring stopped"), err)
+	}
+
 	// get node withdraw address
 	isWithdrawalAddress := false
 	isNodeAddress := false
@@ -373,4 +379,112 @@ func sanitizeString(s string) string {
 		}
 	}
 	return sanitized
+}
+
+// CalculateExpectedProfit simulates the arbitrage transaction and returns the expected profit in ETH
+// without actually executing the transaction
+func CalculateExpectedProfit(ctx context.Context, logger *slog.Logger, dataIn *DataIn) (float64, error) {
+	logger.With(slog.String("function", "CalculateExpectedProfit"))
+
+	err := VerifyInputData(ctx, logger, dataIn)
+	if err != nil {
+		return 0, errors.Join(errors.New("failed to verify input data"), err)
+	}
+
+	// get node withdraw address if needed
+	if dataIn.ReceiverAddress == nil {
+		withdrawalAddress, err := getWithdrawalAddress(ctx, dataIn.Client, dataIn.NetworkId, *dataIn.NodeAddress, dataIn.Ratelimit)
+		if err != nil {
+			return 0, errors.Join(errors.New("failed to get withdrawal address"), err)
+		}
+		dataIn.ReceiverAddress = &withdrawalAddress
+	}
+
+	var bundle *flashbots_client.Bundle
+	var expectedProfit *big.Int
+	if dataIn.LocalReth {
+		// For local rETH, there's no arbitrage profit, just the distribution
+		return 0, nil
+	} else {
+		bundle, expectedProfit, err = BuildCall(ctx, logger, *dataIn)
+		if err != nil {
+			return 0, errors.Join(errors.New("failed to build call"), err)
+		}
+	}
+
+	success, _, _, err := simulateBundle(logger, dataIn, bundle)
+	if err != nil {
+		return 0, errors.Join(errors.New("failed to simulate bundle"), err)
+	}
+
+	if !success {
+		return 0, errors.New("bundle simulation failed")
+	}
+
+	maxBundleFees, maxArbitrageFees := evalGasPrices(bundle)
+
+	// Calculate net profit after fees
+	var netProfit *big.Int
+	if dataIn.CheckProfitIgnoreDistributeCost {
+		netProfit = new(big.Int).Sub(expectedProfit, maxArbitrageFees)
+	} else {
+		netProfit = new(big.Int).Sub(expectedProfit, maxBundleFees)
+	}
+
+	// Convert to float64 ETH
+	netProfitFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(netProfit), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
+	
+	return netProfitFloat, nil
+}
+
+// MonitorProfitUntilThreshold continuously monitors the expected profit and waits until it meets the threshold
+func MonitorProfitUntilThreshold(ctx context.Context, logger *slog.Logger, dataIn *DataIn) error {
+	logger.With(slog.String("function", "MonitorProfitUntilThreshold"))
+
+	if dataIn.Threshold <= 0 {
+		// No threshold set, proceed immediately
+		return nil
+	}
+
+	fmt.Printf("Monitoring profit with threshold of %.6f ETH, checking every %d seconds...\n", dataIn.Threshold, dataIn.MonitorInterval)
+	fmt.Println("Press Ctrl+C to stop monitoring and exit.")
+
+	ticker := time.NewTicker(time.Duration(dataIn.MonitorInterval) * time.Second)
+	defer ticker.Stop()
+
+	// Check profit immediately first
+	profit, err := CalculateExpectedProfit(ctx, logger, dataIn)
+	if err != nil {
+		logger.Warn("Failed to calculate profit", slog.String("error", err.Error()))
+	} else {
+		fmt.Printf("[%s] Current expected profit: %.6f ETH (threshold: %.6f ETH)\n", 
+			time.Now().Format("15:04:05"), profit, dataIn.Threshold)
+		
+		if profit >= dataIn.Threshold {
+			fmt.Printf("✅ Profit threshold met! Proceeding with arbitrage execution...\n\n")
+			return nil
+		}
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			profit, err := CalculateExpectedProfit(ctx, logger, dataIn)
+			if err != nil {
+				logger.Warn("Failed to calculate profit", slog.String("error", err.Error()))
+				fmt.Printf("[%s] ⚠️  Failed to calculate profit: %v\n", time.Now().Format("15:04:05"), err)
+				continue
+			}
+
+			fmt.Printf("[%s] Current expected profit: %.6f ETH (threshold: %.6f ETH)\n", 
+				time.Now().Format("15:04:05"), profit, dataIn.Threshold)
+
+			if profit >= dataIn.Threshold {
+				fmt.Printf("✅ Profit threshold met! Proceeding with arbitrage execution...\n\n")
+				return nil
+			}
+		}
+	}
 }
