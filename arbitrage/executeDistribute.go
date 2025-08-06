@@ -9,6 +9,7 @@ import (
 	"log"
 	"math/big"
 	"os"
+	"rocketpoolArbitrage/rocketpoolContracts/rETH"
 	"rocketpoolArbitrage/rocketpoolContracts/storage"
 	"strings"
 	"time"
@@ -33,9 +34,11 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 	logger.Debug("verified input data")
 
 	// Monitor profit until threshold is met if threshold is specified
-	err = MonitorProfitUntilThreshold(ctx, logger, dataIn)
-	if err != nil {
-		return errors.Join(errors.New("monitoring stopped"), err)
+	if dataIn.Threshold > 0 {
+		err = MonitorProfitUntilThreshold(ctx, logger, dataIn)
+		if err != nil {
+			return errors.Join(errors.New("monitoring stopped"), err)
+		}
 	}
 
 	// get node withdraw address
@@ -437,14 +440,38 @@ func CalculateExpectedProfit(ctx context.Context, logger *slog.Logger, dataIn *D
 	return netProfitFloat, nil
 }
 
+// getRETHDiscountInfo calculates the current rETH discount and market information
+func getRETHDiscountInfo(ctx context.Context, logger *slog.Logger, dataIn *DataIn) (protocolRate float64, discount float64, err error) {
+	// Get rETH contract instance
+	rEthContractAddress, err := GetREthContractAddress(dataIn.NetworkId)
+	if err != nil {
+		return 0, 0, errors.Join(errors.New("failed to get rETH contract address"), err)
+	}
+
+	rethInstance, err := rETH.NewRETH(rEthContractAddress, dataIn.Client)
+	if err != nil {
+		return 0, 0, errors.Join(errors.New("failed to create rETH instance"), err)
+	}
+
+	// Get protocol exchange rate (how much ETH you get per rETH)
+	exchangeRate, err := rethInstance.GetExchangeRate(&bind.CallOpts{Context: ctx})
+	if err != nil {
+		return 0, 0, errors.Join(errors.New("failed to get rETH exchange rate"), err)
+	}
+
+	// Convert to float (exchange rate is in wei, so divide by 1e18)
+	protocolRateFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(exchangeRate), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
+
+	// Calculate discount: (1 - protocolRate) * 100
+	// If protocol rate is 0.98, discount is 2%
+	discountPercent := (1.0 - protocolRateFloat) * 100
+
+	return protocolRateFloat, discountPercent, nil
+}
+
 // MonitorProfitUntilThreshold continuously monitors the expected profit and waits until it meets the threshold
 func MonitorProfitUntilThreshold(ctx context.Context, logger *slog.Logger, dataIn *DataIn) error {
 	logger.With(slog.String("function", "MonitorProfitUntilThreshold"))
-
-	if dataIn.Threshold <= 0 {
-		// No threshold set, proceed immediately
-		return nil
-	}
 
 	fmt.Printf("Monitoring profit with threshold of %.6f ETH, checking every %d seconds...\n", dataIn.Threshold, dataIn.MonitorInterval)
 	fmt.Println("Press Ctrl+C to stop monitoring and exit.")
@@ -454,11 +481,27 @@ func MonitorProfitUntilThreshold(ctx context.Context, logger *slog.Logger, dataI
 
 	// Check profit immediately first
 	profit, err := CalculateExpectedProfit(ctx, logger, dataIn)
+	protocolRate, discount, rethErr := getRETHDiscountInfo(ctx, logger, dataIn)
+	
 	if err != nil {
 		logger.Warn("Failed to calculate profit", slog.String("error", err.Error()))
+		fmt.Printf("[%s] ⚠️  Failed to calculate profit: %v\n", time.Now().Format("15:04:05"), err)
 	} else {
-		fmt.Printf("[%s] Current expected profit: %.6f ETH (threshold: %.6f ETH)\n", 
-			time.Now().Format("15:04:05"), profit, dataIn.Threshold)
+		logger.Info("Profit calculation", 
+			slog.Float64("expectedProfit", profit),
+			slog.Float64("threshold", dataIn.Threshold))
+		
+		if rethErr != nil {
+			logger.Warn("Failed to get rETH discount info", slog.String("error", rethErr.Error()))
+			fmt.Printf("[%s] Expected profit: %.6f ETH (threshold: %.6f ETH) | rETH info: unavailable\n", 
+				time.Now().Format("15:04:05"), profit, dataIn.Threshold)
+		} else {
+			logger.Info("rETH discount info",
+				slog.Float64("protocolRate", protocolRate),
+				slog.Float64("discount", discount))
+			fmt.Printf("[%s] Expected profit: %.6f ETH (threshold: %.6f ETH) | rETH rate: %.6f (%.2f%% discount)\n", 
+				time.Now().Format("15:04:05"), profit, dataIn.Threshold, protocolRate, discount)
+		}
 		
 		if profit >= dataIn.Threshold {
 			fmt.Printf("✅ Profit threshold met! Proceeding with arbitrage execution...\n\n")
@@ -472,14 +515,29 @@ func MonitorProfitUntilThreshold(ctx context.Context, logger *slog.Logger, dataI
 			return ctx.Err()
 		case <-ticker.C:
 			profit, err := CalculateExpectedProfit(ctx, logger, dataIn)
+			protocolRate, discount, rethErr := getRETHDiscountInfo(ctx, logger, dataIn)
+			
 			if err != nil {
 				logger.Warn("Failed to calculate profit", slog.String("error", err.Error()))
 				fmt.Printf("[%s] ⚠️  Failed to calculate profit: %v\n", time.Now().Format("15:04:05"), err)
 				continue
 			}
 
-			fmt.Printf("[%s] Current expected profit: %.6f ETH (threshold: %.6f ETH)\n", 
-				time.Now().Format("15:04:05"), profit, dataIn.Threshold)
+			logger.Info("Profit calculation", 
+				slog.Float64("expectedProfit", profit),
+				slog.Float64("threshold", dataIn.Threshold))
+
+			if rethErr != nil {
+				logger.Warn("Failed to get rETH discount info", slog.String("error", rethErr.Error()))
+				fmt.Printf("[%s] Expected profit: %.6f ETH (threshold: %.6f ETH) | rETH info: unavailable\n", 
+					time.Now().Format("15:04:05"), profit, dataIn.Threshold)
+			} else {
+				logger.Info("rETH discount info",
+					slog.Float64("protocolRate", protocolRate),
+					slog.Float64("discount", discount))
+				fmt.Printf("[%s] Expected profit: %.6f ETH (threshold: %.6f ETH) | rETH rate: %.6f (%.2f%% discount)\n", 
+					time.Now().Format("15:04:05"), profit, dataIn.Threshold, protocolRate, discount)
+			}
 
 			if profit >= dataIn.Threshold {
 				fmt.Printf("✅ Profit threshold met! Proceeding with arbitrage execution...\n\n")
