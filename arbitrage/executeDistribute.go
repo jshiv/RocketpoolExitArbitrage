@@ -32,6 +32,11 @@ func ExecuteDistribute(ctx context.Context, logger *slog.Logger, dataIn *DataIn)
 
 	logger.Debug("verified input data")
 
+	// If threshold is set, run in threshold mode
+	if dataIn.Threshold != nil {
+		return executeDistributeWithThreshold(ctx, logger, dataIn)
+	}
+
 	// get node withdraw address
 	isWithdrawalAddress := false
 	isNodeAddress := false
@@ -373,4 +378,136 @@ func sanitizeString(s string) string {
 		}
 	}
 	return sanitized
+}
+
+func executeDistributeWithThreshold(ctx context.Context, logger *slog.Logger, dataIn *DataIn) error {
+	logger.With(slog.String("function", "executeDistributeWithThreshold"))
+
+	// get node withdraw address
+	isWithdrawalAddress := false
+	isNodeAddress := false
+	if dataIn.ReceiverAddress == nil {
+		withdrawalAddress, err := getWithdrawalAddress(ctx, dataIn.Client, dataIn.NetworkId, *dataIn.NodeAddress, dataIn.Ratelimit)
+		if err != nil {
+			return errors.Join(errors.New("failed to get withdrawal address"), err)
+		}
+
+		logger.Debug("receiver address not set, updated to withdraw address", slog.String("receiverAddress", withdrawalAddress.Hex()))
+		dataIn.ReceiverAddress = &withdrawalAddress
+		if withdrawalAddress.Cmp(*dataIn.NodeAddress) == 0 {
+			isNodeAddress = true
+		} else {
+			isWithdrawalAddress = true
+		}
+	}
+
+	// update user on receiver address
+	if logger.Enabled(ctx, slog.LevelInfo) {
+		fmt.Print("Any profit will be sent to ")
+		fmt.Print(colorOrange, (*dataIn.ReceiverAddress).Hex(), colorReset)
+		if isWithdrawalAddress {
+			fmt.Println(". This should be your withdrawal address.")
+		} else if isNodeAddress {
+			fmt.Println(". This should be your node address.")
+		} else {
+			fmt.Println(". Set with the --receiver flag.")
+		}
+	}
+
+	// if using a random private key, update the fee refund recipient to the receiver address
+	if dataIn.RandomPrivateKey && dataIn.NetworkId != 17000 {
+		err := dataIn.FbClient.UpdateFeeRefundRecipient(*dataIn.ReceiverAddress)
+		if err != nil {
+			return errors.Join(errors.New("failed to update flashbots fee refund recipient"), err)
+		}
+		if logger.Enabled(ctx, slog.LevelInfo) {
+			fmt.Print("Updated flashbots fee refund recipient to ")
+			fmt.Print(colorOrange, (*dataIn.ReceiverAddress).Hex(), colorReset)
+			fmt.Println(".")
+		}
+	}
+
+	thresholdFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(dataIn.Threshold), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
+	fmt.Printf("Waiting for profit to reach threshold of %.6f ETH...\n", thresholdFloat)
+	fmt.Printf("Checking every %v...\n\n", dataIn.CheckInterval)
+
+	ticker := time.NewTicker(dataIn.CheckInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			// Check current profit
+			expectedProfit, err := checkCurrentProfit(ctx, logger, dataIn)
+			if err != nil {
+				logger.Warn("Failed to check current profit", slog.String("error", err.Error()))
+				continue
+			}
+
+			expectedProfitFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(expectedProfit), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
+			
+			if logger.Enabled(ctx, slog.LevelInfo) {
+				fmt.Printf("Current expected profit: %.6f ETH (threshold: %.6f ETH)\n", expectedProfitFloat, thresholdFloat)
+			}
+
+			// If profit meets threshold, execute the arbitrage
+			if expectedProfit.Cmp(dataIn.Threshold) >= 0 {
+				fmt.Printf("Profit threshold met! Expected profit: %.6f ETH\n", expectedProfitFloat)
+				
+				// Create a copy of dataIn without threshold for normal execution
+				normalDataIn := *dataIn
+				normalDataIn.Threshold = nil
+				normalDataIn.CheckInterval = 0
+				
+				return ExecuteDistribute(ctx, logger, &normalDataIn)
+			}
+		}
+	}
+}
+
+func checkCurrentProfit(ctx context.Context, logger *slog.Logger, dataIn *DataIn) (*big.Int, error) {
+	// Build call to get current profit without executing
+	uniswapData, paraswapData, err := CalcualteArbitrageData(
+		ctx,
+		logger,
+		dataIn.Client,
+		dataIn.NodeAddress,
+		dataIn.MinipoolAddresses,
+		dataIn.NetworkId,
+		true, // dry run
+		dataIn.Ratelimit,
+		dataIn.Protocol,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	disributeFee := len(dataIn.MinipoolAddresses) * DISTRIBUTE_CALL_MAX_GAS
+
+	if uniswapData != nil {
+		uniswapData.expectedFee = disributeFee + ARBITRAGE_UNISWAP_CALL_MAX_GAS
+		uniswapData.expectedProfitAfterFees = new(big.Int).Sub(uniswapData.expectedProfit, big.NewInt(int64(uniswapData.expectedFee)))
+	} else {
+		uniswapData = &UniswapArbitrage{
+			expectedProfitAfterFees: big.NewInt(0),
+		}
+	}
+	if paraswapData != nil {
+		paraswapData.expectedFee = disributeFee + ARBITRAGE_PARASWAP_CALL_MAX_GAS
+		paraswapData.expectedProfitAfterFees = new(big.Int).Sub(paraswapData.expectedProfit, big.NewInt(int64(paraswapData.expectedFee)))
+	}
+
+	uniswapIsBetter := uniswapData.expectedProfitAfterFees.Cmp(paraswapData.expectedProfitAfterFees) >= 0
+
+	// Return the better profit
+	if dataIn.Protocol == UniswapProtocol || (dataIn.Protocol == BestProtocol && uniswapIsBetter) {
+		return uniswapData.expectedProfitAfterFees, nil
+	} else if dataIn.Protocol == ParaswapProtocol || (dataIn.Protocol == BestProtocol && !uniswapIsBetter) {
+		return paraswapData.expectedProfitAfterFees, nil
+	} else {
+		// Default to uniswap if protocol is best but neither is better
+		return uniswapData.expectedProfitAfterFees, nil
+	}
 }

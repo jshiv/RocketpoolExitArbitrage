@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"encoding/json"
 	"math/big"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -36,6 +37,8 @@ type DataIn struct {
 	Ratelimit                       int
 	Protocol                        Protocol
 	NetworkId                       uint64
+	Threshold                       *big.Int
+	CheckInterval                   time.Duration
 }
 
 type UniswapArbitrage struct {

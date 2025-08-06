@@ -7,8 +7,11 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"math/big"
 	"rocketpoolArbitrage/arbitrage"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/0xtrooper/flashbots_client"
 	"github.com/ethereum/go-ethereum/common"
@@ -66,6 +69,8 @@ func parseInput(ctx context.Context, logger *slog.Logger) (data *arbitrage.DataI
 		"Private key for the node address used as caller. This can be used if the script should not use the RP daemon to sign transactions. (e.g. when using Allnode)",
 	)
 	ratelimitFlag := flag.Int("ratelimit", 0, "Rate limit in milliseconds between each minipool distribution call. (default: 0)")
+	thresholdFlag := flag.String("threshold", "", "Minimum profit threshold in ETH (e.g., 0.01). If set, the process will wait until profit meets this threshold before executing.")
+	checkIntervalFlag := flag.Duration("check-interval", time.Minute, "Interval between profit checks when using threshold mode. (default: 1m)")
 
 	flag.Parse()
 
@@ -242,5 +247,27 @@ func parseInput(ctx context.Context, logger *slog.Logger) (data *arbitrage.DataI
 	data.Ratelimit = *ratelimitFlag
 	logger.Debug("ratelimit", slog.Int("ratelimit", data.Ratelimit))
 
+	// Parse threshold flag
+	if *thresholdFlag != "" {
+		thresholdFloat, err := parseFloat(*thresholdFlag)
+		if err != nil {
+			return nil, errors.Join(errors.New("failed to parse threshold value"), err)
+		}
+		
+		// Convert ETH to wei (1 ETH = 10^18 wei)
+		thresholdWei := new(big.Float).Mul(big.NewFloat(thresholdFloat), new(big.Float).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)))
+		thresholdInt, _ := thresholdWei.Int(nil)
+		data.Threshold = thresholdInt
+		
+		logger.Debug("threshold", slog.String("threshold", thresholdInt.String()))
+	}
+
+	data.CheckInterval = *checkIntervalFlag
+	logger.Debug("checkInterval", slog.Duration("checkInterval", data.CheckInterval))
+
 	return data, nil
+}
+
+func parseFloat(s string) (float64, error) {
+	return strconv.ParseFloat(s, 64)
 }
