@@ -16,6 +16,8 @@ When **exiting minipools** or **claiming ETH**, it is vital to check for arbitra
 
 The core objective is to leverage **distribute** calls in combination with **rETH burn** to capture potential arbitrage gains. This tool can also facilitate a **flashloan** for users who don't already hold rETH but want to capitalize on the arbitrage.
 
+**Profit Threshold Monitoring**: The tool now supports waiting for optimal arbitrage conditions using the `--threshold` flag. When set, the tool will continuously monitor the expected profit and only execute the arbitrage transaction when the profit meets or exceeds your specified threshold. This allows you to wait for more favorable market conditions before executing.
+
 If you prefer not to run this CLI tool on your validator machine alongside the smartnode daemon—or if you don't have access to the smartnode (for example, when using a service like [Allnodes](https://www.allnodes.com/)) — you can use the `--rpc=...` flag and provide your node operator private key via `--node-private-key`. You can also use your Withdrawal Address instead, depending on what best suits your situation.
 
 If you encounter any issues while using the tool, please open a GitHub issue so we can investigate and address it.
@@ -521,6 +523,24 @@ Notice: When using a free RPC connection, consider setting a rate limit to avoid
   ./distribute --ratelimit=250
   ```
 
+- **Flag**: `--threshold`
+  **Type**: float64  (ETH amount per minipool)
+  **Default**: `0`  
+  **Description**: Minimum profit threshold in ETH per minipool. If set, the tool will monitor profit and wait until the per-minipool profit meets the threshold before executing the arbitrage transaction. When set to 0, the tool executes immediately without monitoring.
+  **Example**: Wait until expected profit reaches 0.01 ETH per minipool before executing.
+  ```bash
+  ./distribute --threshold=0.01 --minipools=0xABC123...
+  ```
+
+- **Flag**: `--monitor-interval`
+  **Type**: int  (seconds)
+  **Default**: `60`  
+  **Description**: Interval in seconds to check profit when using `--threshold`. This controls how frequently the tool recalculates the expected profit to compare against the threshold.
+  **Example**: Check profit every 30 seconds.
+  ```bash
+  ./distribute --threshold=0.01 --monitor-interval=30 --minipools=0xABC123...
+  ```
+
 ---
 
 ## Combining Flags
@@ -532,6 +552,14 @@ You can combine multiple flags in a single command. For example:
 ```
 
 This example enables debug logs, uses local rETH and specifies multiple minipools.
+
+For profit threshold monitoring:
+
+```bash
+./distribute --threshold=0.02 --monitor-interval=30 --minipools=0xABC123...,0xDEF456... --skip-confirmation
+```
+
+This example waits until the expected profit reaches 0.02 ETH per minipool (0.04 ETH total for 2 minipools), checking every 30 seconds, and automatically executes without user confirmation once the threshold is met.
 
 ---
 
