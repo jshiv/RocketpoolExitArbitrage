@@ -66,7 +66,7 @@ func parseInput(ctx context.Context, logger *slog.Logger) (data *arbitrage.DataI
 		"Private key for the node address used as caller. This can be used if the script should not use the RP daemon to sign transactions. (e.g. when using Allnode)",
 	)
 	ratelimitFlag := flag.Int("ratelimit", 0, "Rate limit in milliseconds between each minipool distribution call. (default: 0)")
-	thresholdFlag := flag.Float64("threshold", 0, "Minimum profit threshold in ETH. If set, the tool will monitor profit and wait until threshold is met before executing. (default: 0 - execute immediately)")
+	thresholdFlag := flag.Float64("threshold", 0, "Minimum profit threshold in ETH per minipool. If set, the tool will monitor profit and wait until per-minipool threshold is met before executing. (default: 0 - execute immediately)")
 	monitorIntervalFlag := flag.Int("monitor-interval", 60, "Interval in seconds to check profit when using --threshold. (default: 60 seconds)")
 
 	flag.Parse()

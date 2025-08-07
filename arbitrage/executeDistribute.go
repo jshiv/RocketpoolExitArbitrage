@@ -436,7 +436,7 @@ func CalculateExpectedProfit(ctx context.Context, logger *slog.Logger, dataIn *D
 
 	// Convert to float64 ETH
 	netProfitFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(netProfit), new(big.Float).SetInt(big.NewInt(1e18))).Float64()
-	
+
 	return netProfitFloat, nil
 }
 
@@ -473,38 +473,45 @@ func getRETHDiscountInfo(ctx context.Context, logger *slog.Logger, dataIn *DataI
 func MonitorProfitUntilThreshold(ctx context.Context, logger *slog.Logger, dataIn *DataIn) error {
 	logger.With(slog.String("function", "MonitorProfitUntilThreshold"))
 
-	fmt.Printf("Monitoring profit with threshold of %.6f ETH, checking every %d seconds...\n", dataIn.Threshold, dataIn.MonitorInterval)
+	minipoolCount := len(dataIn.MinipoolAddresses)
+	fmt.Printf("Monitoring profit with threshold of %.6f ETH per minipool (%.6f ETH total for %d minipools), checking every %d seconds...\n",
+		dataIn.Threshold, dataIn.Threshold*float64(minipoolCount), minipoolCount, dataIn.MonitorInterval)
 	fmt.Println("Press Ctrl+C to stop monitoring and exit.")
 
 	ticker := time.NewTicker(time.Duration(dataIn.MonitorInterval) * time.Second)
 	defer ticker.Stop()
 
 	// Check profit immediately first
-	profit, err := CalculateExpectedProfit(ctx, logger, dataIn)
+	totalProfit, err := CalculateExpectedProfit(ctx, logger, dataIn)
 	protocolRate, discount, rethErr := getRETHDiscountInfo(ctx, logger, dataIn)
-	
+
 	if err != nil {
 		logger.Warn("Failed to calculate profit", slog.String("error", err.Error()))
 		fmt.Printf("[%s] ⚠️  Failed to calculate profit: %v\n", time.Now().Format("15:04:05"), err)
 	} else {
-		logger.Info("Profit calculation", 
-			slog.Float64("expectedProfit", profit),
-			slog.Float64("threshold", dataIn.Threshold))
-		
+		profitPerMinipool := totalProfit / float64(minipoolCount)
+
+		logger.Info("Profit calculation",
+			slog.Float64("totalProfit", totalProfit),
+			slog.Float64("profitPerMinipool", profitPerMinipool),
+			slog.Float64("thresholdPerMinipool", dataIn.Threshold),
+			slog.Int("minipoolCount", minipoolCount))
+
 		if rethErr != nil {
 			logger.Warn("Failed to get rETH discount info", slog.String("error", rethErr.Error()))
-			fmt.Printf("[%s] Expected profit: %.6f ETH (threshold: %.6f ETH) | rETH info: unavailable\n", 
-				time.Now().Format("15:04:05"), profit, dataIn.Threshold)
+			fmt.Printf("[%s] Total profit: %.6f ETH (%.6f per minipool) | Threshold: %.6f per minipool | rETH info: unavailable\n",
+				time.Now().Format("15:04:05"), totalProfit, profitPerMinipool, dataIn.Threshold)
 		} else {
 			logger.Info("rETH discount info",
 				slog.Float64("protocolRate", protocolRate),
 				slog.Float64("discount", discount))
-			fmt.Printf("[%s] Expected profit: %.6f ETH (threshold: %.6f ETH) | rETH rate: %.6f (%.2f%% discount)\n", 
-				time.Now().Format("15:04:05"), profit, dataIn.Threshold, protocolRate, discount)
+			fmt.Printf("[%s] Total profit: %.6f ETH (%.6f per minipool) | Threshold: %.6f per minipool | rETH rate: %.6f (%.2f%% discount)\n",
+				time.Now().Format("15:04:05"), totalProfit, profitPerMinipool, dataIn.Threshold, protocolRate, discount)
 		}
-		
-		if profit >= dataIn.Threshold {
-			fmt.Printf("✅ Profit threshold met! Proceeding with arbitrage execution...\n\n")
+
+		if profitPerMinipool >= dataIn.Threshold {
+			fmt.Printf("✅ Profit threshold met! (%.6f per minipool >= %.6f threshold) Proceeding with arbitrage execution...\n\n",
+				profitPerMinipool, dataIn.Threshold)
 			return nil
 		}
 	}
@@ -514,33 +521,38 @@ func MonitorProfitUntilThreshold(ctx context.Context, logger *slog.Logger, dataI
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			profit, err := CalculateExpectedProfit(ctx, logger, dataIn)
+			totalProfit, err := CalculateExpectedProfit(ctx, logger, dataIn)
 			protocolRate, discount, rethErr := getRETHDiscountInfo(ctx, logger, dataIn)
-			
+
 			if err != nil {
 				logger.Warn("Failed to calculate profit", slog.String("error", err.Error()))
 				fmt.Printf("[%s] ⚠️  Failed to calculate profit: %v\n", time.Now().Format("15:04:05"), err)
 				continue
 			}
 
-			logger.Info("Profit calculation", 
-				slog.Float64("expectedProfit", profit),
-				slog.Float64("threshold", dataIn.Threshold))
+			profitPerMinipool := totalProfit / float64(minipoolCount)
+
+			logger.Info("Profit calculation",
+				slog.Float64("totalProfit", totalProfit),
+				slog.Float64("profitPerMinipool", profitPerMinipool),
+				slog.Float64("thresholdPerMinipool", dataIn.Threshold),
+				slog.Int("minipoolCount", minipoolCount))
 
 			if rethErr != nil {
 				logger.Warn("Failed to get rETH discount info", slog.String("error", rethErr.Error()))
-				fmt.Printf("[%s] Expected profit: %.6f ETH (threshold: %.6f ETH) | rETH info: unavailable\n", 
-					time.Now().Format("15:04:05"), profit, dataIn.Threshold)
+				fmt.Printf("[%s] Total profit: %.6f ETH (%.6f per minipool) | Threshold: %.6f per minipool | rETH info: unavailable\n",
+					time.Now().Format("15:04:05"), totalProfit, profitPerMinipool, dataIn.Threshold)
 			} else {
 				logger.Info("rETH discount info",
 					slog.Float64("protocolRate", protocolRate),
 					slog.Float64("discount", discount))
-				fmt.Printf("[%s] Expected profit: %.6f ETH (threshold: %.6f ETH) | rETH rate: %.6f (%.2f%% discount)\n", 
-					time.Now().Format("15:04:05"), profit, dataIn.Threshold, protocolRate, discount)
+				fmt.Printf("[%s] Total profit: %.6f ETH (%.6f per minipool) | Threshold: %.6f per minipool | rETH rate: %.6f (%.2f%% discount)\n",
+					time.Now().Format("15:04:05"), totalProfit, profitPerMinipool, dataIn.Threshold, protocolRate, discount)
 			}
 
-			if profit >= dataIn.Threshold {
-				fmt.Printf("✅ Profit threshold met! Proceeding with arbitrage execution...\n\n")
+			if profitPerMinipool >= dataIn.Threshold {
+				fmt.Printf("✅ Profit threshold met! (%.6f per minipool >= %.6f threshold) Proceeding with arbitrage execution...\n\n",
+					profitPerMinipool, dataIn.Threshold)
 				return nil
 			}
 		}
