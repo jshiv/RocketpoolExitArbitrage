@@ -476,6 +476,7 @@ func MonitorProfitUntilThreshold(ctx context.Context, logger *slog.Logger, dataI
 	minipoolCount := len(dataIn.MinipoolAddresses)
 	fmt.Printf("Monitoring profit with threshold of %.6f ETH per minipool (%.6f ETH total for %d minipools), checking every %d seconds...\n",
 		dataIn.Threshold, dataIn.Threshold*float64(minipoolCount), minipoolCount, dataIn.MonitorInterval)
+	fmt.Println("When threshold is met, execution will proceed automatically without confirmation.")
 	fmt.Println("Press Ctrl+C to stop monitoring and exit.")
 
 	ticker := time.NewTicker(time.Duration(dataIn.MonitorInterval) * time.Second)

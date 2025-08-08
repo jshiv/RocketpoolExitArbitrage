@@ -526,7 +526,7 @@ Notice: When using a free RPC connection, consider setting a rate limit to avoid
 - **Flag**: `--threshold`
   **Type**: float64  (ETH amount per minipool)
   **Default**: `0`  
-  **Description**: Minimum profit threshold in ETH per minipool. If set, the tool will monitor profit and wait until the per-minipool profit meets the threshold before executing the arbitrage transaction. When set to 0, the tool executes immediately without monitoring.
+  **Description**: Minimum profit threshold in ETH per minipool. If set, the tool will monitor profit and wait until the per-minipool profit meets the threshold before executing the arbitrage transaction. When set to 0, the tool executes immediately without monitoring. **Note**: When threshold is set, confirmation is automatically skipped for seamless execution.
   **Example**: Wait until expected profit reaches 0.01 ETH per minipool before executing.
   ```bash
   ./distribute --threshold=0.01 --minipools=0xABC123...
